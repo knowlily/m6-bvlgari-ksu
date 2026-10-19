@@ -132,5 +132,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ksu-ko-${{ inputs.ksu_repo }}-${{ inputs.ksu_ref }}
+          name: ksu-ko-${{ inputs.ksu_repo == 'tiann/KernelSU' && 'upstream' || 'bakasu' }}-${{ inputs.ksu_ref }}
           path: artifacts/
