@@ -3,9 +3,13 @@ name: build-ksu-ko
 on:
   workflow_dispatch:
     inputs:
+      ksu_repo:
+        description: "KernelSU 源码仓库（决定 uapi 号）"
+        default: "Baka-SU/BakaSU"
+        required: true
       ksu_ref:
-        description: "KernelSU tag/branch (v3.2.5 = 与 32525 同代)"
-        default: "v3.2.5"
+        description: "tag/branch：BakaSU v4.2.0-rc3=uapi4 / main=uapi5 / tiann v3.3.1=uapi5"
+        default: "v4.2.0-rc3"
         required: true
       sublevel:
         description: "内核 SUBLEVEL（设备是 157）"
@@ -77,10 +81,12 @@ jobs:
       - name: 集成 KernelSU
         env:
           REF: ${{ inputs.ksu_ref }}
+          KREPO: ${{ inputs.ksu_repo }}
         run: |
           cd work/Code_Opensource/kernel
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/${REF}/kernel/setup.sh" -o /tmp/ksu_setup.sh
+          curl -LSs "https://raw.githubusercontent.com/${KREPO}/${REF}/kernel/setup.sh" -o /tmp/ksu_setup.sh
           bash /tmp/ksu_setup.sh "$REF"
+          grep -rn "KERNEL_SU_UAPI_VERSION" KernelSU/uapi/supercall.h 2>/dev/null || true
           ls -d KernelSU && cat KernelSU/kernel/Makefile | head -20
 
       - name: 配置
@@ -126,5 +132,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ksu-ko-${{ inputs.ksu_ref }}
+          name: ksu-ko-${{ inputs.ksu_repo }}-${{ inputs.ksu_ref }}
           path: artifacts/
