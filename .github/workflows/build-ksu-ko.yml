@@ -1,0 +1,123 @@
+name: build-ksu-ko
+
+on:
+  workflow_dispatch:
+    inputs:
+      ksu_ref:
+        description: "KernelSU tag/branch (v3.2.5 = 与 32525 同代)"
+        default: "v3.2.5"
+        required: true
+      sublevel:
+        description: "内核 SUBLEVEL（设备是 157）"
+        default: "157"
+        required: true
+      localversion:
+        description: "LOCALVERSION（要和 uname -r 的后缀一致）"
+        default: "-android14-11-g7d3922fade43"
+        required: true
+      source_url:
+        description: "厂商源码 zip 的下载地址（留空用仓库变量 HONOR_SRC_URL）"
+        default: ""
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bc bison flex libssl-dev libelf-dev zip unzip \
+            curl git python3 cpio rsync clang-17 lld-17 llvm-17
+
+      - name: 缓存厂商源码
+        id: cache-src
+        uses: actions/cache@v4
+        with:
+          path: src.zip
+          key: honor-bvlgari-src-v1
+
+      - name: 下载厂商源码
+        env:
+          SRC_URL: ${{ inputs.source_url != '' && inputs.source_url || vars.HONOR_SRC_URL }}
+        run: |
+          if [ -s src.zip ]; then echo "已缓存"; ls -lh src.zip; exit 0; fi
+          if [ -z "$SRC_URL" ]; then echo "!! 没有源码地址"; exit 1; fi
+          curl -L --retry 3 --max-time 3000 \
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36" \
+            -H "Referer: https://www.honor.com/global/opensource/detail.html" \
+            -o src.zip "$SRC_URL"
+          ls -lh src.zip
+
+      - name: 解包内核树
+        run: |
+          unzip -o -q src.zip Code_Opensource.tar.gz
+          mkdir -p work
+          tar -xzf Code_Opensource.tar.gz -C work Code_Opensource/kernel
+          du -sh work/Code_Opensource/kernel
+          head -5 work/Code_Opensource/kernel/Makefile
+
+      - name: 对齐版本号（vermagic）
+        run: |
+          cd work/Code_Opensource/kernel
+          sed -i "s/^SUBLEVEL = .*/SUBLEVEL = ${{ inputs.sublevel }}/" Makefile
+          python3 - <<'EOF'
+import re, os
+p = "Makefile"
+s = open(p).read()
+print([l for l in s.splitlines()[:6]])
+EOF
+          grep -nE "^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)" Makefile
+
+      - name: 集成 KernelSU
+        env:
+          REF: ${{ inputs.ksu_ref }}
+        run: |
+          cd work/Code_Opensource/kernel
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/${REF}/kernel/setup.sh" -o /tmp/ksu_setup.sh
+          bash /tmp/ksu_setup.sh "$REF"
+          ls -d KernelSU && cat KernelSU/kernel/Makefile | head -20
+
+      - name: 配置
+        run: |
+          cd work/Code_Opensource/kernel
+          mkdir -p out
+          if [ -f "$GITHUB_WORKSPACE/config/device.config" ]; then
+            echo "使用设备 config"
+            cp "$GITHUB_WORKSPACE/config/device.config" out/.config
+            echo "${{ inputs.localversion }}" > /tmp/lv
+          else
+            echo "!! 没有 config/device.config ⇒ 用 gki_defconfig（CRC 可能对不上）"
+            scripts/config --file arch/arm64/configs/gki_defconfig --set-str LOCALVERSION "${{ inputs.localversion }}" || true
+            make -s O=out ARCH=arm64 LLVM=1 gki_defconfig
+          fi
+          # 保证 MODVERSIONS / 模块支持
+          ./scripts/config --file out/.config -e MODULES -e MODVERSIONS -e MODULE_UNLOAD || true
+          ./scripts/config --file out/.config --set-str LOCALVERSION "${{ inputs.localversion }}" || true
+          make -s O=out ARCH=arm64 LLVM=1 olddefconfig
+          grep -E "CONFIG_(MODVERSIONS|MODULE_UNLOAD|LOCALVERSION|SMP|PREEMPT)" out/.config | head
+
+      - name: 编译（全量，产出 Module.symvers）
+        run: |
+          cd work/Code_Opensource/kernel
+          export KBUILD_BUILD_USER=build-user KBUILD_BUILD_HOST=build-host
+          make -j"$(nproc)" O=out ARCH=arm64 LLVM=1 2>&1 | tail -60
+
+      - name: 收集 ko
+        run: |
+          mkdir -p artifacts
+          find work/Code_Opensource/kernel -name "kernelsu*.ko" -exec cp -v {} artifacts/ \;
+          ls -l artifacts/
+          for f in artifacts/*.ko; do
+            echo "=== $f"
+            strings "$f" | grep -m3 -E "vermagic|^6\.1\.|uapi" || true
+            strings "$f" | grep -c "sucompat-kp" || true
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ksu-ko-${{ inputs.ksu_ref }}
+          path: artifacts/
