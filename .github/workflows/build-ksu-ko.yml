@@ -130,6 +130,14 @@ jobs:
             strings "$f" | grep -c "sucompat-kp" || true
           done
 
+      - name: CRC 比对（设备真实符号表）
+        if: always()
+        run: |
+          for f in artifacts/*.ko; do
+            echo "=== $f"
+            python3 scripts/check_crc.py "$f" config/device_crc.json || echo "!! 有 CRC 不一致，见上"
+          done
+
       - uses: actions/upload-artifact@v4
         with:
           name: ksu-ko-${{ inputs.ksu_repo == 'tiann/KernelSU' && 'upstream' || 'bakasu' }}-${{ inputs.ksu_ref }}
