@@ -35,3 +35,21 @@ MagicOS10.0-ROM-Bvlgari_MagicOS10.0_Code_Opensource
 - `strings kernelsu.ko | grep sucompat-kp` 有命中 ⇒ kprobe sucompat 编进去了
 - `strings kernelsu.ko | grep vermagic` 必须是 `6.1.157-android14-11-g7d3922fade43 ...`
 - 装到设备后：`dmesg | grep -i "sucompat"` 出现 `direct syscall-table hooks installed` 或 `sucompat-kp` 注册成功
+
+## 版本策略（2026-10-19 起）
+
+**只做 uapi 5。** uapi 4 / uapi 2 的构建全部作废，不再维护。
+
+| 源码 | uapi | 配套管理器 |
+|---|---|---|
+| `Baka-SU/BakaSU` `main` | 5 | BakaSU `35234` |
+| `tiann/KernelSU` `v3.3.1` | 5 | 官方 `32680` |
+
+已废弃：
+
+- `tiann/KernelSU` `v3.2.5` / `v3.3.0` → uapi **2**（`KERNEL_SU_UAPI_VERSION = 2`）
+- `Baka-SU/BakaSU` `v4.2.0-rc3` → uapi **4**（管理器和内核要成对换）
+
+## 坑
+
+`make ... | tail -60` 会让 tail 提前关管道、make 收到 SIGPIPE 死掉，而管道退出码是 tail 的 0 ⇒ 步骤显示成功但没有任何产物。必须 `set -o pipefail` 或重定向到 build.log。
