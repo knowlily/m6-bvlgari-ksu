@@ -109,6 +109,11 @@ jobs:
           # 设备 config 里 MODULE_SIG_ALL=y/MODULE_SIG_KEY=honor_signing_key.pem，我们没有这把私钥
           # 只是个 ko，不需要签名（设备 sig_enforce 已被关掉）
           ./scripts/config --file out/.config -d MODULE_SIG_ALL -d MODULE_SIG_FORCE -d MODULE_SIG || true
+          # 荣耀没把 fs/f2fs/hyper_prealloc.c 放出来（Makefile 却引用了它），源码里也没有任何调用点
+          if [ ! -f fs/f2fs/hyper_prealloc.c ]; then
+            echo "厂商树缺 fs/f2fs/hyper_prealloc.c ⇒ 关掉 CONFIG_F2FS_HYPER_PREALLOC"
+            ./scripts/config --file out/.config -d F2FS_HYPER_PREALLOC || true
+          fi
           ./scripts/config --file out/.config --set-str LOCALVERSION "${{ inputs.localversion }}" || true
           make -s O=out ARCH=arm64 LLVM=1 olddefconfig
           grep -E "CONFIG_(MODVERSIONS|MODULE_UNLOAD|LOCALVERSION|SMP|PREEMPT)" out/.config | head
