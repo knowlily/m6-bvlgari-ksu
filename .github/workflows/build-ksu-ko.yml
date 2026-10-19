@@ -98,6 +98,11 @@ jobs:
           fi
           # 保证 MODVERSIONS / 模块支持
           ./scripts/config --file out/.config -e MODULES -e MODVERSIONS -e MODULE_UNLOAD || true
+          # LOCALVERSION_AUTO=y 在没有 .git 时会乱加后缀，必须关掉，否则 vermagic 对不上
+          ./scripts/config --file out/.config -d LOCALVERSION_AUTO || true
+          # 设备 config 里 MODULE_SIG_ALL=y/MODULE_SIG_KEY=honor_signing_key.pem，我们没有这把私钥
+          # 只是个 ko，不需要签名（设备 sig_enforce 已被关掉）
+          ./scripts/config --file out/.config -d MODULE_SIG_ALL -d MODULE_SIG_FORCE -d MODULE_SIG || true
           ./scripts/config --file out/.config --set-str LOCALVERSION "${{ inputs.localversion }}" || true
           make -s O=out ARCH=arm64 LLVM=1 olddefconfig
           grep -E "CONFIG_(MODVERSIONS|MODULE_UNLOAD|LOCALVERSION|SMP|PREEMPT)" out/.config | head
