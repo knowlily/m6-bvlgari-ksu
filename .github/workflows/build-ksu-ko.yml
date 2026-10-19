@@ -35,13 +35,14 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq bc bison flex libssl-dev libelf-dev zip unzip \
-            curl git python3 cpio rsync clang-17 lld-17 llvm-17
+            curl git python3 cpio rsync dwarves clang-17 lld-17 llvm-17
           # Ubuntu 只给带版本后缀的可执行文件，Kbuild 找的是无后缀名
           for t in clang clang++ ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump \
                    llvm-readelf llvm-strip llvm-size llvm-as llvm-dis; do
             src=$(command -v ${t}-17 || true)
             [ -n "$src" ] && sudo ln -sf "$src" "/usr/local/bin/$t"
           done
+          pahole --version || true
           clang --version | head -2
           ld.lld --version | head -1
 
@@ -104,6 +105,8 @@ jobs:
           fi
           # 保证 MODVERSIONS / 模块支持
           ./scripts/config --file out/.config -e MODULES -e MODVERSIONS -e MODULE_UNLOAD || true
+          # KSU 默认 default y 会编进 vmlinux，我们要的是 .ko ⇒ 强制 =m
+          ./scripts/config --file out/.config -m KSU || true
           # LOCALVERSION_AUTO=y 在没有 .git 时会乱加后缀，必须关掉，否则 vermagic 对不上
           ./scripts/config --file out/.config -d LOCALVERSION_AUTO || true
           # 设备 config 里 MODULE_SIG_ALL=y/MODULE_SIG_KEY=honor_signing_key.pem，我们没有这把私钥
@@ -136,6 +139,7 @@ jobs:
       - name: 收集 ko
         run: |
           mkdir -p artifacts
+          grep -E "^CONFIG_(KSU|KSU_DEBUG)" work/Code_Opensource/kernel/out/.config || echo "!! CONFIG_KSU 没进 .config"
           find work/Code_Opensource/kernel -name "kernelsu*.ko" -exec cp -v {} artifacts/ \;
           ls -l artifacts/
           for f in artifacts/*.ko; do
