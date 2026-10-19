@@ -64,12 +64,6 @@ jobs:
         run: |
           cd work/Code_Opensource/kernel
           sed -i "s/^SUBLEVEL = .*/SUBLEVEL = ${{ inputs.sublevel }}/" Makefile
-          python3 - <<'EOF'
-import re, os
-p = "Makefile"
-s = open(p).read()
-print([l for l in s.splitlines()[:6]])
-EOF
           grep -nE "^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)" Makefile
 
       - name: 集成 KernelSU
