@@ -129,12 +129,26 @@ jobs:
           # 设备内核不导出 path_umount/selinux_state 等符号 ⇒ 先让 modpost 只警告，拿到 ko
           # 真正的办法是在模块里做 kallsyms 运行时解析（见 scripts/gen_shim.py）
           export KBUILD_MODPOST_WARN=1
-          if ! make -j"$(nproc)" O=out ARCH=arm64 LLVM=1 > build.log 2>&1; then
-            echo "===== 失败，最后 120 行 ====="
+          # 只编 vmlinux（跑完 built-in modpost，产出 Module.symvers）+ KSU 子目录。
+          # 不再编厂商 config 里那 62 个 =m 驱动：它们和内核模块毫无关系，纯浪费 20-40 分钟。
+          if ! make -j"$(nproc)" O=out ARCH=arm64 LLVM=1 vmlinux > build.log 2>&1; then
+            echo "===== vmlinux 失败，最后 120 行 ====="
             tail -120 build.log
             echo "===== 错误摘要 ====="
             grep -nE "error:|Error [0-9]|No rule|not found" build.log | head -40
             exit 1
+          fi
+          if ! make -j"$(nproc)" O=out ARCH=arm64 LLVM=1 drivers/kernelsu/ >> build.log 2>&1; then
+            echo "===== KSU 子目录失败，最后 120 行 ====="
+            tail -120 build.log
+            grep -nE "error:|Error [0-9]" build.log | head -40
+            exit 1
+          fi
+          if ! ls out/drivers/kernelsu/*.ko >/dev/null 2>&1; then
+            echo "!! 定向编译没出 ko，回退全量 make"
+            if ! make -j"$(nproc)" O=out ARCH=arm64 LLVM=1 >> build.log 2>&1; then
+              tail -120 build.log; exit 1
+            fi
           fi
           tail -20 build.log
           ls -l out/Module.symvers
