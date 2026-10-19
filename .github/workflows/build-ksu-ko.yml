@@ -32,6 +32,14 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq bc bison flex libssl-dev libelf-dev zip unzip \
             curl git python3 cpio rsync clang-17 lld-17 llvm-17
+          # Ubuntu 只给带版本后缀的可执行文件，Kbuild 找的是无后缀名
+          for t in clang clang++ ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump \
+                   llvm-readelf llvm-strip llvm-size llvm-as llvm-dis; do
+            src=$(command -v ${t}-17 || true)
+            [ -n "$src" ] && sudo ln -sf "$src" "/usr/local/bin/$t"
+          done
+          clang --version | head -2
+          ld.lld --version | head -1
 
       - name: 缓存厂商源码
         id: cache-src
