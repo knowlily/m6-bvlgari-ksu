@@ -77,6 +77,9 @@ jobs:
         run: |
           cd work/Code_Opensource/kernel
           sed -i "s/^SUBLEVEL = .*/SUBLEVEL = ${{ inputs.sublevel }}/" Makefile
+          # 树不是 git 仓库 ⇒ setlocalversion 会追加 '+'，导致 vermagic 与 uname -r 差一个字符
+          # 而内核拒载。touch 一个空 .scmversion 即可让 setlocalversion 直接返回空。
+          touch .scmversion
           grep -nE "^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)" Makefile
 
       - name: 集成 KernelSU
