@@ -115,9 +115,18 @@ jobs:
 
       - name: 编译（全量，产出 Module.symvers）
         run: |
+          set -o pipefail
           cd work/Code_Opensource/kernel
           export KBUILD_BUILD_USER=build-user KBUILD_BUILD_HOST=build-host
-          make -j"$(nproc)" O=out ARCH=arm64 LLVM=1 2>&1 | tail -60
+          if ! make -j"$(nproc)" O=out ARCH=arm64 LLVM=1 > build.log 2>&1; then
+            echo "===== 失败，最后 120 行 ====="
+            tail -120 build.log
+            echo "===== 错误摘要 ====="
+            grep -nE "error:|Error [0-9]|No rule|not found" build.log | head -40
+            exit 1
+          fi
+          tail -20 build.log
+          ls -l out/Module.symvers
 
       - name: 收集 ko
         run: |
@@ -137,6 +146,14 @@ jobs:
             echo "=== $f"
             python3 scripts/check_crc.py "$f" config/device_crc.json || echo "!! 有 CRC 不一致，见上"
           done
+
+      - name: 上传 build.log（总是）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildlog-${{ inputs.ksu_ref }}
+          path: work/Code_Opensource/kernel/build.log
+          if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
