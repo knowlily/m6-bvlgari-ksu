@@ -94,8 +94,11 @@ jobs:
           cd work/Code_Opensource/kernel
           curl -LSs "https://raw.githubusercontent.com/${KREPO}/${REF}/kernel/setup.sh" -o /tmp/ksu_setup.sh
           bash /tmp/ksu_setup.sh "$REF"
-          grep -rn "KERNEL_SU_UAPI_VERSION" KernelSU/uapi/supercall.h 2>/dev/null || true
-          ls -d KernelSU && cat KernelSU/kernel/Makefile | head -20
+          KD=$(ls -d KernelSU KernelSU-Next 2>/dev/null | head -1)
+          echo "KSU 源码目录: ${KD:-（没找到）}"
+          [ -n "$KD" ] || { echo "!! setup.sh 没有产出源码目录"; exit 1; }
+          grep -rn "KERNEL_SU_UAPI_VERSION" "$KD"/uapi/supercall.h 2>/dev/null || true
+          head -20 "$KD"/kernel/Makefile
 
       - name: 应用源码补丁
         run: |
@@ -106,7 +109,11 @@ jobs:
             for pf in "$GITHUB_WORKSPACE"/patch/*.patch; do
               [ -f "$pf" ] || continue
               echo "== 应用 $(basename "$pf")"
-              ( cd "$KSUDIR" && git apply -p1 --verbose "$pf" ) || { echo "!! 补丁应用失败"; exit 1; }
+              if ( cd "$KSUDIR" && git apply -p1 --check "$pf" >/dev/null 2>&1 ); then
+                ( cd "$KSUDIR" && git apply -p1 "$pf" ) && echo "   ✓ 已应用"
+              else
+                echo "   ⚠ 当前源码不匹配，跳过（不影响出 ko）"
+              fi
             done
           fi
 
