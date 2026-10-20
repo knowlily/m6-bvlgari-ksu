@@ -11,6 +11,10 @@ on:
         description: "tag/branch：BakaSU v4.2.0-rc3=uapi4 / main=uapi5 / tiann v3.3.1=uapi5"
         default: "v4.2.0-rc3"
         required: true
+      ksu_debug:
+        description: "打开 CONFIG_KSU_DEBUG（ksud debug set-manager 可用 + 保留 kobject）"
+        type: boolean
+        default: true
       sublevel:
         description: "内核 SUBLEVEL（设备是 157）"
         default: "157"
@@ -93,6 +97,19 @@ jobs:
           grep -rn "KERNEL_SU_UAPI_VERSION" KernelSU/uapi/supercall.h 2>/dev/null || true
           ls -d KernelSU && cat KernelSU/kernel/Makefile | head -20
 
+      - name: 应用源码补丁
+        run: |
+          cd work/Code_Opensource/kernel
+          KSUDIR=$(ls -d KernelSU KernelSU-Next 2>/dev/null | head -1)
+          echo "KernelSU 源码目录: $KSUDIR"
+          if [ -n "$KSUDIR" ] && [ -d "$GITHUB_WORKSPACE/patch" ]; then
+            for pf in "$GITHUB_WORKSPACE"/patch/*.patch; do
+              [ -f "$pf" ] || continue
+              echo "== 应用 $(basename "$pf")"
+              ( cd "$KSUDIR" && git apply -p1 --verbose "$pf" ) || { echo "!! 补丁应用失败"; exit 1; }
+            done
+          fi
+
       - name: 配置
         run: |
           cd work/Code_Opensource/kernel
@@ -110,6 +127,12 @@ jobs:
           ./scripts/config --file out/.config -e MODULES -e MODVERSIONS -e MODULE_UNLOAD || true
           # KSU 默认 default y 会编进 vmlinux，我们要的是 .ko ⇒ 强制 =m
           ./scripts/config --file out/.config -m KSU || true
+          if [ "${{ inputs.ksu_debug }}" = "true" ]; then
+            ./scripts/config --file out/.config -e KSU_DEBUG || true
+            echo "CONFIG_KSU_DEBUG=y"
+          else
+            ./scripts/config --file out/.config -d KSU_DEBUG || true
+          fi
           # LOCALVERSION_AUTO=y 在没有 .git 时会乱加后缀，必须关掉，否则 vermagic 对不上
           ./scripts/config --file out/.config -d LOCALVERSION_AUTO || true
           # 设备 config 里 MODULE_SIG_ALL=y/MODULE_SIG_KEY=honor_signing_key.pem，我们没有这把私钥

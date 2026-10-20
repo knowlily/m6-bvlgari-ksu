@@ -1,0 +1,38 @@
+diff --git a/kernel/hook/arm64/syscall_hook.c b/kernel/hook/arm64/syscall_hook.c
+index 7bd6df0..ae83667 100644
+--- a/kernel/hook/arm64/syscall_hook.c
++++ b/kernel/hook/arm64/syscall_hook.c
+@@ -147,6 +147,14 @@ static int __init ksu_find_ni_syscall_slots(int *out_slots, int max_slots)
+ // otherwise it's a spurious call — return -ENOSYS.
+ static long __nocfi ksu_syscall_dispatcher(const struct pt_regs *regs)
+ {
++    {
++        static int ksu_dbg_disp_cnt;
++        if (ksu_dbg_disp_cnt < 30) {
++            ksu_dbg_disp_cnt++;
++            pr_info("ksu-dbg DISP: syscallno=%d disp=%d x8=%lu\n", regs->syscallno, ksu_dispatcher_nr,
++                    (unsigned long)PT_REGS_ORIG_SYSCALL(regs));
++        }
++    }
+     if (regs->syscallno != ksu_dispatcher_nr)
+         return -ENOSYS;
+ 
+diff --git a/kernel/hook/syscall_hook_manager.c b/kernel/hook/syscall_hook_manager.c
+index cf21fed..33ae8e0 100644
+--- a/kernel/hook/syscall_hook_manager.c
++++ b/kernel/hook/syscall_hook_manager.c
+@@ -108,6 +108,14 @@ static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id)
+ 
+     if (ksu_has_syscall_hook(id)) {
+         struct pt_regs *current_regs = task_pt_regs(current);
++        {
++            static int ksu_dbg_enter_cnt;
++            if (ksu_dbg_enter_cnt < 30) {
++                ksu_dbg_enter_cnt++;
++                pr_info("ksu-dbg ENTER: id=%ld disp=%d syscallno=%d x8=%lu\n", id, ksu_dispatcher_nr,
++                        current_regs->syscallno, (unsigned long)PT_REGS_ORIG_SYSCALL(current_regs));
++            }
++        }
+ 
+ #if defined(__x86_64__)
+         // Stash the original syscall number in ax.
