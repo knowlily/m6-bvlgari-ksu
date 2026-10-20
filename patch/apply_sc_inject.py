@@ -64,6 +64,9 @@ module_param_named(sc_ni, ksu_sc_ni_addr, ulong, 0644);""", 1)
                   'pr_alert("ksu: sys_call_table=0x%lx (injected=%d)\\n", (unsigned long)ksu_syscall_table, (int)(ksu_sc_table_addr != 0));', 1)
     s = s.replace('pr_info("dispatcher installed at slot %d\\n", ksu_dispatcher_nr);',
                   'pr_alert("ksu: dispatcher installed at slot %d\\n", ksu_dispatcher_nr);', 1)
+    # 回读校验：patch 是否真的落进 sys_call_table（Honor 内核常写到别名页/只读副本）
+    s = s.replace('pr_alert("ksu: dispatcher installed at slot %d\\n", ksu_dispatcher_nr);',
+                  'pr_alert("ksu: dispatcher installed at slot %d readback=%px want=%px\\n", ksu_dispatcher_nr, (void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]), (void *)ksu_syscall_dispatcher);', 1)
 
     anchor = "static long __nocfi ksu_syscall_dispatcher(const struct pt_regs *regs)\n{\n"
     if anchor in s:
