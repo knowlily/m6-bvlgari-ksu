@@ -91,6 +91,12 @@ def patch_mgr(root):
     s, crlf = load(p)
     if "skip redirect" in s:
         return "already"
+    old_dual = "        PT_REGS_ORIG_SYSCALL(current_regs) = id;\n        current_regs->syscallno = ksu_dispatcher_nr;"
+    new_dual = (old_dual
+                + "\n        /* 2026-10-20 dual write: callback regs may differ from task_pt_regs */"
+                + "\n        PT_REGS_ORIG_SYSCALL(regs) = id;"
+                + "\n        ((struct pt_regs *)regs)->syscallno = ksu_dispatcher_nr;")
+
     old = "    if (ksu_has_syscall_hook(id)) {\n        struct pt_regs *current_regs = task_pt_regs(current);\n"
     if old not in s:
         return "skip: anchor not found"
@@ -108,7 +114,17 @@ def patch_mgr(root):
                          current_regs->syscallno, (unsigned long)PT_REGS_ORIG_SYSCALL(current_regs));
             }
         }
+        {
+            static int ksu_dbg_ptr_cnt;
+            if (ksu_dbg_ptr_cnt < 5) {
+                ksu_dbg_ptr_cnt++;
+                pr_alert("ksu-dbg PTR: cb=%px task=%px same=%d\\n", (void *)regs, (void *)current_regs,
+                         (int)((void *)regs == (void *)current_regs));
+            }
+        }
 """, 1)
+    if old_dual in s:
+        s = s.replace(old_dual, new_dual, 1)
     save(p, s, crlf)
     return "patched"
 
