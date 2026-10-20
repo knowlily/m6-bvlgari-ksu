@@ -67,6 +67,13 @@ module_param_named(sc_ni, ksu_sc_ni_addr, ulong, 0644);""", 1)
     # 回读校验：patch 是否真的落进 sys_call_table（Honor 内核常写到别名页/只读副本）
     s = s.replace('pr_alert("ksu: dispatcher installed at slot %d\\n", ksu_dispatcher_nr);',
                   'pr_alert("ksu: dispatcher installed at slot %d readback=%px want=%px\\n", ksu_dispatcher_nr, (void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]), (void *)ksu_syscall_dispatcher);', 1)
+    # 安全阀：patch 没落进表时禁用重定向，避免「改写成功但槽里还是 ni_syscall」⇒ 全系统 ENOSYS
+    s = s.replace('''(void *)ksu_syscall_dispatcher);''',
+                  '''(void *)ksu_syscall_dispatcher);
+    if ((void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]) != (void *)ksu_syscall_dispatcher) {
+        pr_alert("ksu: slot patch NOT effective -> redirect disabled (safe mode)\\n");
+        ksu_dispatcher_nr = -1;
+    }''', 1)
 
     anchor = "static long __nocfi ksu_syscall_dispatcher(const struct pt_regs *regs)\n{\n"
     if anchor in s:
