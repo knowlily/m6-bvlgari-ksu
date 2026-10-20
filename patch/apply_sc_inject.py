@@ -39,6 +39,8 @@ def patch_hook(root):
                       """/* 2026-10-20: alternate write path (fixmap write of sys_call_table has no effect on Honor) */
 extern int set_memory_rw(unsigned long addr, int numpages);
 extern int set_memory_ro(unsigned long addr, int numpages);
+extern int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid);
+static void ksu_sp_hooks_init(void);
 
 syscall_fn_t *ksu_syscall_table = NULL;""", 1)
         hit += 1
@@ -140,6 +142,63 @@ module_param_named(sc_ni, ksu_sc_ni_addr, ulong, 0644);""", 1)
 """ + old_r, 1)
             save(pb, sb, cb)
             hit += 1
+    # ── setresuid kprobe：绕开死掉的 sys_call_table dispatcher ──
+    #   为什么要它：管理器拿内核 fd 的唯一入口是 ksu_handle_setresuid()
+    #   （zygote fork 后 setresuid 时把 [ksu_driver] fd 塞进管理器进程）。
+    #   dispatcher 死了 ⇒ 这条永远不跑 ⇒ 管理器 scan_driver_fd() 扫不到
+    #   ⇒ isManager=false ⇒ ksuVersion=null ⇒ 首页显示「未安装」。
+    if "ksu_sp_setresuid_kp" not in s:
+        s = s.rstrip() + '''
+
+/* 2026-10-21: setresuid kprobe —— sys_call_table dispatcher 在本机不可用
+ * （fixmap 写不进去 / set_memory_rw=-22），改用 kprobe 走同一条业务逻辑。
+ * 管理器进程拿到 [ksu_driver] fd 全靠这里。 */
+#include <linux/kprobes.h>
+#include <linux/cred.h>
+#include <linux/sched.h>
+
+extern int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid);
+
+static int ksu_sp_setresuid_pre(struct kprobe *p, struct pt_regs *regs)
+{
+    struct pt_regs *real = (struct pt_regs *)regs->regs[0];
+    unsigned int euid;
+    if (!real)
+        return 0;
+    euid = (unsigned int)real->regs[1];
+    if (euid == 0xffffffffu)
+        return 0;
+    ksu_handle_setresuid(current_uid().val, (uid_t)euid);
+    return 0;
+}
+
+static struct kprobe ksu_sp_setresuid_kp = {
+    .symbol_name = "__arm64_sys_setresuid",
+    .pre_handler = ksu_sp_setresuid_pre,
+};
+
+static void ksu_sp_hooks_init(void)
+{
+    int rc = register_kprobe(&ksu_sp_setresuid_kp);
+    pr_alert("ksu: setresuid kprobe rc=%d\\n", rc);
+}
+'''
+        s = s.rstrip() + "\n"
+        # 我们的块必须落在 __aarch64__ 守卫内：把原来的 #endif 挪到文件尾
+        if "#endif /* __aarch64__ */" in s:
+            s = s.replace("#endif /* __aarch64__ */", "", 1)
+            s = s.rstrip() + "\n#endif /* __aarch64__ */\n"
+        hit += 1
+
+    # 在 init 末尾调用 kprobe 注册
+    if "ksu_sp_hooks_init();" not in s:
+        s = s.replace('''        pr_alert("ksu: rw-path OK, dispatcher active\\n");
+        }''', '''        pr_alert("ksu: rw-path OK, dispatcher active\\n");
+        }
+    ksu_sp_hooks_init();''', 1)
+        if "ksu_sp_hooks_init();" in s:
+            hit += 1
+
     if hit == 0:
         return "skip: anchors not found"
     save(p, s, crlf)
