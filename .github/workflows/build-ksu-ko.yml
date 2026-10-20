@@ -37,9 +37,13 @@ jobs:
 
       - name: 依赖
         run: |
-          sudo apt-get update -qq
+          # GitHub 的 runner 镜像偶尔会带一个坏掉的微软源（403 Forbidden），
+          # 会让 apt-get update 整个退出 100。删掉它 + 允许 update 失败。
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list \
+                     /etc/apt/sources.list.d/azure-cli*.list 2>/dev/null || true
+          sudo apt-get update -qq || echo "apt-get update 失败，继续（依赖多半已预装）"
           sudo apt-get install -y -qq bc bison flex libssl-dev libelf-dev zip unzip \
-            curl git python3 cpio rsync dwarves clang-17 lld-17 llvm-17
+            curl git python3 cpio rsync dwarves clang-17 lld-17 llvm-17 || true
           # Ubuntu 只给带版本后缀的可执行文件，Kbuild 找的是无后缀名
           for t in clang clang++ ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump \
                    llvm-readelf llvm-strip llvm-size llvm-as llvm-dis; do
