@@ -33,6 +33,16 @@ def patch_hook(root):
         return "already"
     hit = 0
 
+    # TODO: prototypes for the alternate write path
+    if "set_memory_rw(" not in s:
+        s = s.replace("syscall_fn_t *ksu_syscall_table = NULL;",
+                      """/* 2026-10-20: alternate write path (fixmap write of sys_call_table has no effect on Honor) */
+extern int set_memory_rw(unsigned long addr, int numpages);
+extern int set_memory_ro(unsigned long addr, int numpages);
+
+syscall_fn_t *ksu_syscall_table = NULL;""", 1)
+        hit += 1
+
     old0 = "syscall_fn_t *ksu_syscall_table = NULL;\nint ksu_dispatcher_nr = -1;"
     if old0 in s:
         s = s.replace(old0, old0 + """
@@ -67,12 +77,25 @@ module_param_named(sc_ni, ksu_sc_ni_addr, ulong, 0644);""", 1)
     # 回读校验：patch 是否真的落进 sys_call_table（Honor 内核常写到别名页/只读副本）
     s = s.replace('pr_alert("ksu: dispatcher installed at slot %d\\n", ksu_dispatcher_nr);',
                   'pr_alert("ksu: dispatcher installed at slot %d readback=%px want=%px\\n", ksu_dispatcher_nr, (void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]), (void *)ksu_syscall_dispatcher);', 1)
-    # 安全阀：patch 没落进表时禁用重定向，避免「改写成功但槽里还是 ni_syscall」⇒ 全系统 ENOSYS
+    # 安全阀 + 备用写入路径：patch 没落进表时，改用 set_memory_rw 直写再回读
     s = s.replace('''(void *)ksu_syscall_dispatcher);''',
                   '''(void *)ksu_syscall_dispatcher);
     if ((void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]) != (void *)ksu_syscall_dispatcher) {
-        pr_alert("ksu: slot patch NOT effective -> redirect disabled (safe mode)\\n");
-        ksu_dispatcher_nr = -1;
+        unsigned long _pg = (unsigned long)&ksu_syscall_table[ksu_dispatcher_nr] & PAGE_MASK;
+        int _rc = set_memory_rw(_pg, 1);
+        pr_alert("ksu: rw-path set_memory_rw(%px)=%d\\n", (void *)_pg, _rc);
+        if (_rc == 0) {
+            WRITE_ONCE(ksu_syscall_table[ksu_dispatcher_nr], (syscall_fn_t)ksu_syscall_dispatcher);
+            set_memory_ro(_pg, 1);
+            pr_alert("ksu: rw-path after write slot=%d val=%px\\n", ksu_dispatcher_nr,
+                     (void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]));
+        }
+        if ((void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]) != (void *)ksu_syscall_dispatcher) {
+            pr_alert("ksu: slot patch NOT effective -> redirect disabled (safe mode)\\n");
+            ksu_dispatcher_nr = -1;
+        } else {
+            pr_alert("ksu: rw-path OK, dispatcher active\\n");
+        }
     }''', 1)
 
     anchor = "static long __nocfi ksu_syscall_dispatcher(const struct pt_regs *regs)\n{\n"
@@ -87,6 +110,18 @@ module_param_named(sc_ni, ksu_sc_ni_addr, ulong, 0644);""", 1)
     }
 """, 1)
         hit += 1
+
+    # ── patch_memory.c：确认 fixmap 写入到底有没有落到物理页 ──
+    pm = os.path.join(root, "kernel/hook/arm64/patch_memory.c")
+    if os.path.exists(pm):
+        sm, cm = load(pm)
+        if "fixmap_read" not in sm:
+            old_pm = "    ret = (int)copy_to_kernel_nofault(map, src, len);"
+            if old_pm in sm:
+                sm = sm.replace(old_pm, old_pm + '''
+    pr_alert("ksu: patch dst=%px len=%zu ret=%d fixmap_read=%px\\n", dst, len, ret, *(void **)map);''', 1)
+                save(pm, sm, cm)
+                hit += 1
 
     # ── reboot 诊断：谁在重启设备（Honor bootfail 会 30-60s 自动重启）──
     pb = os.path.join(root, "kernel/supercall/supercall.c")
