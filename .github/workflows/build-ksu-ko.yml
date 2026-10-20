@@ -102,19 +102,14 @@ jobs:
 
       - name: 应用源码补丁
         run: |
-          cd work/Code_Opensource/kernel
+          cd work/Code_opensource/kernel
           KSUDIR=$(ls -d KernelSU KernelSU-Next 2>/dev/null | head -1)
-          echo "KernelSU 源码目录: $KSUDIR"
-          if [ -n "$KSUDIR" ] && [ -d "$GITHUB_WORKSPACE/patch" ]; then
-            for pf in "$GITHUB_WORKSPACE"/patch/*.patch; do
-              [ -f "$pf" ] || continue
-              echo "== 应用 $(basename "$pf")"
-              if ( cd "$KSUDIR" && git apply -p1 --check "$pf" >/dev/null 2>&1 ); then
-                ( cd "$KSUDIR" && git apply -p1 "$pf" ) && echo "   ✓ 已应用"
-              else
-                echo "   ⚠ 当前源码不匹配，跳过（不影响出 ko）"
-              fi
-            done
+          echo "KernelSU 源码目录: ${KSUDIR:-（没找到）}"
+          if [ -n "$KSUDIR" ] && [ -f "$GITHUB_WORKSPACE/patch/apply_sc_inject.py" ]; then
+            python3 "$GITHUB_WORKSPACE/patch/apply_sc_inject.py" "$KSUDIR" || true
+            echo "---- 注入结果自检 ----"
+            grep -n "ksu_sc_table_addr\|skip redirect" "$KSUDIR/kernel/hook/arm64/syscall_hook.c" | head -4 || true
+            grep -n "skip redirect" "$KSUDIR/kernel/hook/syscall_hook_manager.c" | head -2 || true
           fi
 
       - name: 配置
