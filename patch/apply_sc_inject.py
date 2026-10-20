@@ -88,6 +88,23 @@ module_param_named(sc_ni, ksu_sc_ni_addr, ulong, 0644);""", 1)
 """, 1)
         hit += 1
 
+    # ── reboot 诊断：谁在重启设备（Honor bootfail 会 30-60s 自动重启）──
+    pb = os.path.join(root, "kernel/supercall/supercall.c")
+    if os.path.exists(pb) and "ksu-dbg REBOOT" not in open(pb, encoding="utf-8", errors="replace").read():
+        sb, cb = load(pb)
+        old_r = """    if (magic1 == KSU_INSTALL_MAGIC1 && magic2 == KSU_INSTALL_MAGIC2) {"""
+        if old_r in sb:
+            sb = sb.replace(old_r, """    {
+        static int _ksu_rb_cnt;
+        if (_ksu_rb_cnt < 10) {
+            _ksu_rb_cnt++;
+            pr_alert("ksu-dbg REBOOT: pid=%d comm=%s magic=%x/%x\\n",
+                     current->pid, current->comm, magic1, magic2);
+        }
+    }
+""" + old_r, 1)
+            save(pb, sb, cb)
+            hit += 1
     if hit == 0:
         return "skip: anchors not found"
     save(p, s, crlf)
