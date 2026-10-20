@@ -102,7 +102,7 @@ jobs:
 
       - name: 应用源码补丁
         run: |
-          cd work/Code_opensource/kernel
+          cd work/Code_Opensource/kernel
           KSUDIR=$(ls -d KernelSU KernelSU-Next 2>/dev/null | head -1)
           echo "KernelSU 源码目录: ${KSUDIR:-（没找到）}"
           if [ -n "$KSUDIR" ] && [ -f "$GITHUB_WORKSPACE/patch/apply_sc_inject.py" ]; then
