@@ -158,6 +158,9 @@ module_param_named(kimg_voff, ksu_kimg_voff_addr, ulong, 0644);""", 1)
  * （fixmap 写不进去 / set_memory_rw=-22），改用 kprobe 走同一条业务逻辑。
  * 管理器进程拿到 [ksu_driver] fd 全靠这里。 */
 #include <linux/kprobes.h>
+#include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/fs.h>
 #include <linux/cred.h>
 #include <linux/sched.h>
 
@@ -181,10 +184,51 @@ static struct kprobe ksu_sp_setresuid_kp = {
     .pre_handler = ksu_sp_setresuid_pre,
 };
 
+/* 2026-10-21: su 重定向 —— 把 execve("/system/bin/su") 换成 App 自己 lib 目录里的
+ * ksud 副本（标签 apk_data_file，untrusted_app 拥有 execute 权限），
+ * 不依赖 sys_call_table，也不需要 SELinux permissive。 */
+extern bool __ksu_is_allow_uid_for_current(uid_t uid);
+
+static char *ksu_su_path;
+module_param_named(su_path, ksu_su_path, charp, 0644);
+
+static int ksu_su_exec_pre(struct kprobe *p, struct pt_regs *regs)
+{
+    struct filename *fn = (struct filename *)regs->regs[1];
+    const char *n;
+    char *np;
+
+    if (!ksu_su_path || !ksu_su_path[0])
+        return 0;
+    if (!fn || !fn->name)
+        return 0;
+    n = fn->name;
+    if (strcmp(n, "/system/bin/su") && strcmp(n, "/system/xbin/su") && strcmp(n, "su"))
+        return 0;
+    if (!__ksu_is_allow_uid_for_current(current_uid().val))
+        return 0;
+    np = kstrdup(ksu_su_path, GFP_ATOMIC);
+    if (!np)
+        return 0;
+    pr_alert("ksu: su-redirect uid=%d %s -> %s\\n", current_uid().val, n, ksu_su_path);
+    kfree(fn->name);
+    fn->name = np;
+    return 0;
+}
+
+static struct kprobe ksu_su_exec_kp = {
+    .symbol_name = "do_execveat_common",
+    .pre_handler = ksu_su_exec_pre,
+};
+
 static void ksu_sp_hooks_init(void)
 {
     int rc = register_kprobe(&ksu_sp_setresuid_kp);
+    int rc2;
+
     pr_alert("ksu: setresuid kprobe rc=%d\\n", rc);
+    rc2 = register_kprobe(&ksu_su_exec_kp);
+    pr_alert("ksu: su-exec kprobe rc=%d path=%s\\n", rc2, ksu_su_path ? ksu_su_path : "(null)");
 }
 '''
         s = s.rstrip() + "\n"
