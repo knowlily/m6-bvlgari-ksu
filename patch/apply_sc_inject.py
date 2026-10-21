@@ -36,7 +36,7 @@ def patch_hook(root):
     # 2026-10-21：phys_to_virt / PAGE_MASK 需要 mm.h + asm/memory.h
     if "asm/memory.h" not in s and '#include "klog.h"' in s:
         s = s.replace('#include "klog.h"',
-                      '#include "klog.h"\n#include <linux/mm.h>\n#include <asm/memory.h>', 1)
+                      '#include "klog.h"\n#include <linux/mm.h>\n#include <linux/err.h>\n#include <linux/vmalloc.h>\n#include <asm/memory.h>', 1)
         hit += 1
 
     # TODO: prototypes for the alternate write path
@@ -104,27 +104,40 @@ module_param_named(kimg_voff, ksu_kimg_voff_addr, ulong, 0644);""", 1)
                      (void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]));
         }
         if ((void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]) != (void *)ksu_syscall_dispatcher) {
-            /* 2026-10-21 第三个写入口：线性别名（phys_to_virt）。
-             * 前两条都失败 ⇒ 问题在「物理地址算错」或「fixmap 映射只读」。
-             * 这里把页表走查值和 kimage_voffset 校正值都打出来，失败也知道是哪一种。 */
+        if ((void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]) != (void *)ksu_syscall_dispatcher) {
+            /* 2026-10-21 第三个写入口：vmap 新映射。
+             * 实测（3.16.6 首轮 Oops）：sys_call_table 所在的直接映射页是只读的
+             * （pmd=0x...781，AP[2]=1），直接写线性别名 = permission fault ⇒ Oops。
+             * 所以改成给这一页新建一个可写映射（vm_map_ram），在自有映射里写，
+             * 不动直接映射的保护，也不会因为 UAF 保护直接崩。*/
             unsigned long _va = (unsigned long)&ksu_syscall_table[ksu_dispatcher_nr];
             int _e1 = 0;
             unsigned long _ph = phys_from_virt(_va & PAGE_MASK, &_e1);
             unsigned long _ph_k = 0;
+            syscall_fn_t _nv = (syscall_fn_t)ksu_syscall_dispatcher;
             if (ksu_kimg_voff_addr) {
                 unsigned long _voff = *(unsigned long *)ksu_kimg_voff_addr;
                 if (_voff)
                     _ph_k = _va - _voff;
             }
-            pr_alert("ksu: phys walk=0x%lx err=%d kimg=0x%lx\\n", _ph, _e1, _ph_k);
-            if (_ph_k)          /* image 内地址：kimage_voffset 绝对值更可信 */
+            if (_ph_k)
                 _ph = _ph_k;
+            pr_alert("ksu: phys walk=0x%lx err=%d kimg=0x%lx\\n", _ph, _e1, _ph_k);
+
             if (_ph) {
-                unsigned long _la = (unsigned long)phys_to_virt(_ph & PAGE_MASK) | (_va & ~PAGE_MASK);
-                pr_alert("ksu: linear alias=%px pa=0x%lx\\n", (void *)_la, _ph);
-                WRITE_ONCE(*(syscall_fn_t *)_la, (syscall_fn_t)ksu_syscall_dispatcher);
-                pr_alert("ksu: linear after write slot=%d val=%px\\n", ksu_dispatcher_nr,
-                         (void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]));
+                struct page *_pg = pfn_to_page(__phys_to_pfn(_ph));
+                void *_vm = vm_map_ram(&_pg, 1, -1);
+                if (!IS_ERR_OR_NULL(_vm)) {
+                    syscall_fn_t *_dst = (syscall_fn_t *)((char *)_vm + (_va & ~PAGE_MASK));
+                    pr_alert("ksu: vmap=%px dst=%px before=%px\\n", _vm, _dst, (void *)*_dst);
+                    WRITE_ONCE(*_dst, _nv);
+                    smp_mb();
+                    pr_alert("ksu: vmap after write vmapval=%px normal=%px\\n",
+                             (void *)*_dst, (void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]));
+                    vm_unmap_ram(_vm, 1);
+                } else {
+                    pr_alert("ksu: vm_map_ram failed (%ld)\\n", PTR_ERR(_vm));
+                }
             }
         }
 
