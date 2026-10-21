@@ -33,6 +33,12 @@ def patch_hook(root):
         return "already"
     hit = 0
 
+    # 2026-10-21：phys_to_virt / PAGE_MASK 需要 mm.h + asm/memory.h
+    if "asm/memory.h" not in s and '#include "klog.h"' in s:
+        s = s.replace('#include "klog.h"',
+                      '#include "klog.h"\n#include <linux/mm.h>\n#include <asm/memory.h>', 1)
+        hit += 1
+
     # TODO: prototypes for the alternate write path
     if "set_memory_rw(" not in s:
         s = s.replace("syscall_fn_t *ksu_syscall_table = NULL;",
@@ -54,7 +60,12 @@ syscall_fn_t *ksu_syscall_table = NULL;""", 1)
 static unsigned long ksu_sc_table_addr = 0;
 module_param_named(sc_table, ksu_sc_table_addr, ulong, 0644);
 static unsigned long ksu_sc_ni_addr = 0;
-module_param_named(sc_ni, ksu_sc_ni_addr, ulong, 0644);""", 1)
+module_param_named(sc_ni, ksu_sc_ni_addr, ulong, 0644);
+
+/* kimage_voffset 的「符号地址」（不是值）。loader 从 /proc/kallsyms 取地址传进来，
+ * 内核里解引用即得 KASLR 后镜像的 VA→PA 偏移，用来校正页表走查算出的物理地址。 */
+static unsigned long ksu_kimg_voff_addr = 0;
+module_param_named(kimg_voff, ksu_kimg_voff_addr, ulong, 0644);""", 1)
         hit += 1
 
     m = re.search(r'\n([ \t]*ni_syscall = \(unsigned long\)ksu_resolve_symbol_for_functable_hook\("__arm64_sys_ni_syscall"\);)', s)
