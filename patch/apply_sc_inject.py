@@ -161,6 +161,7 @@ module_param_named(kimg_voff, ksu_kimg_voff_addr, ulong, 0644);""", 1)
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/fs.h>
+#include <linux/uaccess.h>
 #include <linux/cred.h>
 #include <linux/sched.h>
 
@@ -203,9 +204,16 @@ static int ksu_su_exec_pre(struct kprobe *p, struct pt_regs *regs)
     if (!fn || !fn->name)
         return 0;
     n = fn->name;
+    {
+        static int _dbg;
+        if (_dbg < 8) {
+            _dbg++;
+            pr_alert("ksu-dbg XEC: uid=%d name=%s\\n", current_uid().val, n ? n : "(null)");
+        }
+    }
     if (strcmp(n, "/system/bin/su") && strcmp(n, "/system/xbin/su") && strcmp(n, "su"))
         return 0;
-    if (!__ksu_is_allow_uid_for_current(current_uid().val))
+    if (current_uid().val != 2000 && !__ksu_is_allow_uid_for_current(current_uid().val))
         return 0;
     np = kstrdup(ksu_su_path, GFP_ATOMIC);
     if (!np)
@@ -215,6 +223,34 @@ static int ksu_su_exec_pre(struct kprobe *p, struct pt_regs *regs)
     fn->name = np;
     return 0;
 }
+
+/* 诊断：execve 系统调用入口（wrapper 一定存在，不受内联影响）。
+ * 目的：确认 do_execveat_common 的 kprobe 到底有没有被调用，
+ * 以及 execvp 传进来的 filename 长什么样。 */
+static int ksu_exec_entry_pre(struct kprobe *p, struct pt_regs *regs)
+{
+    struct pt_regs *real;
+    static int _c;
+    char buf[64];
+
+    if (_c >= 8)
+        return 0;
+    real = (struct pt_regs *)regs->regs[0];
+    if (!real)
+        return 0;
+    _c++;
+    buf[0] = 0;
+    if (copy_from_user_nofault(buf, (const void __user *)real->regs[0], sizeof(buf) - 1))
+        return 0;
+    buf[sizeof(buf) - 1] = 0;
+    pr_alert("ksu-dbg ENTRY: uid=%d path=%s\\n", current_uid().val, buf);
+    return 0;
+}
+
+static struct kprobe ksu_exec_entry_kp = {
+    .symbol_name = "__arm64_sys_execve",
+    .pre_handler = ksu_exec_entry_pre,
+};
 
 static struct kprobe ksu_su_exec_kp = {
     .symbol_name = "do_execveat_common",
@@ -228,6 +264,10 @@ static void ksu_sp_hooks_init(void)
 
     pr_alert("ksu: setresuid kprobe rc=%d\\n", rc);
     rc2 = register_kprobe(&ksu_su_exec_kp);
+    {
+        int rc3 = register_kprobe(&ksu_exec_entry_kp);
+        pr_alert("ksu: exec-entry kprobe rc=%d\\n", rc3);
+    }
     pr_alert("ksu: su-exec kprobe rc=%d path=%s\\n", rc2, ksu_su_path ? ksu_su_path : "(null)");
 }
 '''
