@@ -93,6 +93,31 @@ module_param_named(sc_ni, ksu_sc_ni_addr, ulong, 0644);""", 1)
                      (void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]));
         }
         if ((void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]) != (void *)ksu_syscall_dispatcher) {
+            /* 2026-10-21 第三个写入口：线性别名（phys_to_virt）。
+             * 前两条都失败 ⇒ 问题在「物理地址算错」或「fixmap 映射只读」。
+             * 这里把页表走查值和 kimage_voffset 校正值都打出来，失败也知道是哪一种。 */
+            unsigned long _va = (unsigned long)&ksu_syscall_table[ksu_dispatcher_nr];
+            int _e1 = 0;
+            unsigned long _ph = phys_from_virt(_va & PAGE_MASK, &_e1);
+            unsigned long _ph_k = 0;
+            if (ksu_kimg_voff_addr) {
+                unsigned long _voff = *(unsigned long *)ksu_kimg_voff_addr;
+                if (_voff)
+                    _ph_k = _va - _voff;
+            }
+            pr_alert("ksu: phys walk=0x%lx err=%d kimg=0x%lx\\n", _ph, _e1, _ph_k);
+            if (_ph_k)          /* image 内地址：kimage_voffset 绝对值更可信 */
+                _ph = _ph_k;
+            if (_ph) {
+                unsigned long _la = (unsigned long)phys_to_virt(_ph & PAGE_MASK) | (_va & ~PAGE_MASK);
+                pr_alert("ksu: linear alias=%px pa=0x%lx\\n", (void *)_la, _ph);
+                WRITE_ONCE(*(syscall_fn_t *)_la, (syscall_fn_t)ksu_syscall_dispatcher);
+                pr_alert("ksu: linear after write slot=%d val=%px\\n", ksu_dispatcher_nr,
+                         (void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]));
+            }
+        }
+
+        if ((void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]) != (void *)ksu_syscall_dispatcher) {
             pr_alert("ksu: slot patch NOT effective -> redirect disabled (safe mode)\\n");
             ksu_dispatcher_nr = -1;
         } else {
