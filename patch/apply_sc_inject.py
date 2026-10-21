@@ -85,69 +85,24 @@ module_param_named(kimg_voff, ksu_kimg_voff_addr, ulong, 0644);""", 1)
         hit += 1
     s = s.replace('pr_info("sys_call_table=0x%lx", (unsigned long)ksu_syscall_table);',
                   'pr_alert("ksu: sys_call_table=0x%lx (injected=%d)\\n", (unsigned long)ksu_syscall_table, (int)(ksu_sc_table_addr != 0));', 1)
-    s = s.replace('pr_info("dispatcher installed at slot %d\\n", ksu_dispatcher_nr);',
-                  'pr_alert("ksu: dispatcher installed at slot %d\\n", ksu_dispatcher_nr);', 1)
-    # 回读校验：patch 是否真的落进 sys_call_table（Honor 内核常写到别名页/只读副本）
-    s = s.replace('pr_alert("ksu: dispatcher installed at slot %d\\n", ksu_dispatcher_nr);',
-                  'pr_alert("ksu: dispatcher installed at slot %d readback=%px want=%px\\n", ksu_dispatcher_nr, (void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]), (void *)ksu_syscall_dispatcher);', 1)
-    # 安全阀 + 备用写入路径：patch 没落进表时，改用 set_memory_rw 直写再回读
-    s = s.replace('''(void *)ksu_syscall_dispatcher);''',
-                  '''(void *)ksu_syscall_dispatcher);
-    if ((void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]) != (void *)ksu_syscall_dispatcher) {
-        unsigned long _pg = (unsigned long)&ksu_syscall_table[ksu_dispatcher_nr] & PAGE_MASK;
-        int _rc = set_memory_rw(_pg, 1);
-        pr_alert("ksu: rw-path set_memory_rw(%px)=%d\\n", (void *)_pg, _rc);
-        if (_rc == 0) {
-            WRITE_ONCE(ksu_syscall_table[ksu_dispatcher_nr], (syscall_fn_t)ksu_syscall_dispatcher);
-            set_memory_ro(_pg, 1);
-            pr_alert("ksu: rw-path after write slot=%d val=%px\\n", ksu_dispatcher_nr,
-                     (void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]));
-        }
-        if ((void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]) != (void *)ksu_syscall_dispatcher) {
-        if ((void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]) != (void *)ksu_syscall_dispatcher) {
-            /* 2026-10-21 第三个写入口：vmap 新映射。
-             * 实测（3.16.6 首轮 Oops）：sys_call_table 所在的直接映射页是只读的
-             * （pmd=0x...781，AP[2]=1），直接写线性别名 = permission fault ⇒ Oops。
-             * 所以改成给这一页新建一个可写映射（vm_map_ram），在自有映射里写，
-             * 不动直接映射的保护，也不会因为 UAF 保护直接崩。*/
-            unsigned long _va = (unsigned long)&ksu_syscall_table[ksu_dispatcher_nr];
-            int _e1 = 0;
-            unsigned long _ph = phys_from_virt(_va & PAGE_MASK, &_e1);
-            unsigned long _ph_k = 0;
-            syscall_fn_t _nv = (syscall_fn_t)ksu_syscall_dispatcher;
-            if (ksu_kimg_voff_addr) {
-                unsigned long _voff = *(unsigned long *)ksu_kimg_voff_addr;
-                if (_voff)
-                    _ph_k = _va - _voff;
-            }
-            if (_ph_k)
-                _ph = _ph_k;
-            pr_alert("ksu: phys walk=0x%lx err=%d kimg=0x%lx\\n", _ph, _e1, _ph_k);
+    # ── 回读 + 兜底写入全部收敛到 ksu_force_patch_table() ──
+    orig_print = 'pr_info("dispatcher installed at slot %d\\n", ksu_dispatcher_nr);'
+    if orig_print in s:
+        s = s.replace(orig_print,
+                      'pr_alert("ksu: dispatcher installed at slot %d readback=%px want=%px\\n", ksu_dispatcher_nr, (void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]), (void *)ksu_syscall_dispatcher);\n'
+                      '    ksu_force_patch_table();\n'
+                      '    ksu_sp_hooks_init();', 1)
+        hit += 1
 
-            if (_ph) {
-                struct page *_pg = pfn_to_page(__phys_to_pfn(_ph));
-                void *_vm = vm_map_ram(&_pg, 1, -1);
-                if (!IS_ERR_OR_NULL(_vm)) {
-                    syscall_fn_t *_dst = (syscall_fn_t *)((char *)_vm + (_va & ~PAGE_MASK));
-                    pr_alert("ksu: vmap=%px dst=%px before=%px\\n", _vm, _dst, (void *)*_dst);
-                    WRITE_ONCE(*_dst, _nv);
-                    smp_mb();
-                    pr_alert("ksu: vmap after write vmapval=%px normal=%px\\n",
-                             (void *)*_dst, (void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]));
-                    vm_unmap_ram(_vm, 1);
-                } else {
-                    pr_alert("ksu: vm_map_ram failed (%ld)\\n", PTR_ERR(_vm));
-                }
-            }
-        }
-
-        if ((void *)READ_ONCE(ksu_syscall_table[ksu_dispatcher_nr]) != (void *)ksu_syscall_dispatcher) {
-            pr_alert("ksu: slot patch NOT effective -> redirect disabled (safe mode)\\n");
-            ksu_dispatcher_nr = -1;
-        } else {
-            pr_alert("ksu: rw-path OK, dispatcher active\\n");
-        }
-    }''', 1)
+    # 兜底写入函数（文件作用域）：单独放 patch/force_patch_table.c，避免在 init 里堆嵌套 if
+    if "ksu_force_patch_table(void)" not in s.split("ksu_syscall_hook_init(void)")[0]:
+        helper = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "force_patch_table.c"),
+                      encoding="utf-8").read()
+        k = s.find("ksu_syscall_hook_init(void)")
+        if k > 0:
+            ls = s.rfind("\n", 0, k) + 1     # 该函数签名行行首（可能是 void __init ...）
+            s = s[:ls] + helper + "\n" + s[ls:]
+            hit += 1
 
     anchor = "static long __nocfi ksu_syscall_dispatcher(const struct pt_regs *regs)\n{\n"
     if anchor in s:
@@ -238,15 +193,6 @@ static void ksu_sp_hooks_init(void)
             s = s.replace("#endif /* __aarch64__ */", "", 1)
             s = s.rstrip() + "\n#endif /* __aarch64__ */\n"
         hit += 1
-
-    # 在 init 末尾调用 kprobe 注册
-    if "ksu_sp_hooks_init();" not in s:
-        s = s.replace('''        pr_alert("ksu: rw-path OK, dispatcher active\\n");
-        }''', '''        pr_alert("ksu: rw-path OK, dispatcher active\\n");
-        }
-    ksu_sp_hooks_init();''', 1)
-        if "ksu_sp_hooks_init();" in s:
-            hit += 1
 
     if hit == 0:
         return "skip: anchors not found"
