@@ -60,6 +60,53 @@ static bool ksu_pkg_match(const char *pkg)
 
 '''
 
+CROWN = r'''
+static void crown_manager(const char *apk, struct list_head *uid_data)
+{
+    struct list_head *list = (struct list_head *)uid_data;
+    struct uid_data *np;
+    const char *p = ksu_mgr_pkgs;
+
+    if (!p || !*p) {
+        /* 没传 mgr_pkgs：完全保持原生行为（单包名） */
+        list_for_each_entry (np, list, list) {
+            if (strncmp(np->package, KSU_PACKAGE_NAME, KSU_MAX_PACKAGE_NAME) == 0) {
+                pr_info("Crowning manager: uid=%d\n", np->uid);
+                ksu_set_manager_appid(np->uid);
+                break;
+            }
+        }
+        return;
+    }
+
+    /*
+     * 按 mgr_pkgs 的书写顺序优先，而不是按 packages.list 的遍历顺序。
+     * 设备上同时装着官方 / ReSukiSU / Next 时，原先"任意匹配"会挑到字母序最靠前的
+     * com.resukisu.resukisu（真机现象：Crowning manager: uid=10512，而用户装的
+     * me.weishu.kernelsu 是 11207 ⇒ 管理器所有 ioctl 被 permission denied）。
+     * loader 已经把"用户选中的那个管理器"写在第一位，这里就尊重这个顺序。
+     */
+    while (p && *p) {
+        const char *comma = strchr(p, ',');
+        size_t len = comma ? (size_t)(comma - p) : strlen(p);
+
+        if (len) {
+            list_for_each_entry (np, list, list) {
+                if (strlen(np->package) == len && !strncmp(np->package, p, len)) {
+                    pr_info("Crowning manager: %.*s uid=%d\n", (int)len, p, np->uid);
+                    ksu_set_manager_appid(np->uid);
+                    return;
+                }
+            }
+        }
+        if (!comma)
+            break;
+        p = comma + 1;
+    }
+    pr_info("Crowning manager: none of mgr_pkgs found on device\n");
+}
+'''
+
 REPLACES = [
     ("strncmp(np->package, KSU_PACKAGE_NAME, KSU_MAX_PACKAGE_NAME) == 0",
      "ksu_pkg_match(np->package)"),
@@ -68,6 +115,28 @@ REPLACES = [
     ("strcmp(np->package, KSU_PACKAGE_NAME) == 0",
      "ksu_pkg_match(np->package)"),
 ]
+
+
+def _replace_func(src, sig, new_text):
+    """把以 sig 开头的函数整体替换成 new_text（大括号配平）。"""
+    i = src.find(sig)
+    if i < 0:
+        return src, False
+    j = src.find("{", i)
+    if j < 0:
+        return src, False
+    depth = 0
+    k = j
+    while k < len(src):
+        c = src[k]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        k += 1
+    return src[:i] + new_text.strip("\n") + src[k + 1:], True
 
 
 def patch_file(path):
@@ -85,10 +154,14 @@ def patch_file(path):
             src = src.replace(old, new)
             hits += n
 
-    # 2) 再插入 helper（放在第一个 crown_manager 定义之前；找不到就退回第一处 #define 之前）
+    # 2) 插入 helper + 顺序敏感地整只替换 crown_manager()
     anchor = "static void crown_manager("
     if anchor in src:
         src = src.replace(anchor, BLOCK + anchor, 1)
+        src, ok = _replace_func(src, "static void crown_manager(const char *apk", CROWN)
+        print(f"[mgr-pkgs] crown_manager 顺序敏感替换: {'OK' if ok else '未命中'}")
+        if not ok:
+            print(f"[mgr-pkgs] {path}: 没找到 crown_manager 定义，加冕顺序未修")
     else:
         idx = src.find("#define")
         if idx < 0:

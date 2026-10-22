@@ -196,6 +196,8 @@ static struct kprobe ksu_sp_setresuid_kp = {
  * 步骤②：换身份（begin_new_exec 改 bprm->cred + security_bprm_committing_creds 之后改 SID）
  */
 extern bool __ksu_is_allow_uid_for_current(uid_t uid);
+/* 管理器 uid（manager/manager_identity.h 的全局）；只读，用来放行管理器自己的 su */
+extern uid_t ksu_manager_appid;
 
 static char *ksu_su_path;
 module_param_named(su_path, ksu_su_path, charp, 0644);
@@ -214,9 +216,19 @@ static int ksu_su_exec_pre(struct kprobe *p, struct pt_regs *regs)
     n = fn->name;
     if (strcmp(n, "/system/bin/su") && strcmp(n, "/system/xbin/su") && strcmp(n, "su"))
         return 0;
-    pr_alert("ksu-dbg SU-EXEC uid=%d pid=%d n=%s\\n", current_uid().val, current->pid, n);
-    if (current_uid().val != 2000 && !__ksu_is_allow_uid_for_current(current_uid().val))
-        return 0;
+    {
+        uid_t _u = current_uid().val;
+        /* 2026-10-22：管理器(如 me.weishu.kernelsu)不在 allowlist 里，但 KSU 语义上它
+         * 本来就该有 root —— 不放行的话，管理器自己的 su 永远走不到重定向。
+         * 注意这里只影响"文件名改写"；真正换 cred 的步骤②仍按 pid 认领，
+         * 且 ① 之外还有 allowlist/manager 两道门，普通 App 不会因此拿到 root。 */
+        bool _mgr = (ksu_manager_appid != (uid_t)-1) && (_u % 100000 == ksu_manager_appid);
+        pr_alert("ksu-dbg SU-EXEC uid=%d pid=%d mgr=%d n=%s\\n", _u, current->pid, (int)_mgr, n);
+        if (_u == 2000)
+            return 0;
+        if (!_mgr && !__ksu_is_allow_uid_for_current(_u))
+            return 0;
+    }
     np = kstrdup(ksu_su_path, GFP_ATOMIC);
     if (!np)
         return 0;
