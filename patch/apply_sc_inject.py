@@ -163,6 +163,10 @@ module_param_named(kimg_voff, ksu_kimg_voff_addr, ulong, 0644);""", 1)
 #include <linux/fs.h>
 #include <linux/uaccess.h>
 #include <linux/cred.h>
+#include <linux/capability.h>
+#include <linux/jiffies.h>
+#include <linux/binfmts.h>
+#include <linux/cred.h>
 #include <linux/sched.h>
 
 extern int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid);
