@@ -317,6 +317,84 @@ static struct kprobe ksu_bprm_begin_kp = {
     .pre_handler = ksu_bprm_begin_pre,
 };
 
+/* ==== access()/stat() 伪装 ====
+ * shell 在 exec 前会先判断目标是否存在：access("/system/bin/su", X_OK)。
+ * 真机上这个文件不存在 -> 检查失败 -> 直接 "inaccessible or not found"，
+ * 走不到 execve，步骤①的钩子就永远不会触发（真机日志证实）。
+ * 这里把 access/stat 的路径参数改写成我们那份 ksud 副本（apk_data_file，
+ * 确实存在且可执行），检查通过；紧接着的 execve 再由步骤①换成同一文件。
+ * 只对 allowlist / 管理器 uid 生效，别的进程连一次 strlen 都不做。 */
+static int ksu_su_check_on = 1;
+module_param_named(su_check, ksu_su_check_on, int, 0644);
+
+static int ksu_su_check_name(const char __user *ufn)
+{
+    char buf[32];
+    long r;
+
+    if (!ufn)
+        return 0;
+    r = strncpy_from_user_nofault(buf, ufn, sizeof(buf) - 1);
+    if (r <= 0)
+        return 0;
+    buf[r] = 0;
+    return !strcmp(buf, "/system/bin/su") || !strcmp(buf, "/system/xbin/su") ||
+           !strcmp(buf, "/sbin/su") || !strcmp(buf, "su");
+}
+
+/* 拷到用户栈指针下方，再把系统调用的路径参数指过去。
+ * copy_to_user 出错（缺页/越界）就返回 NULL，调用方原样放行，绝不动寄存器。 */
+static char __user *ksu_su_push_path(const char *s, unsigned long usp)
+{
+    size_t len = strlen(s) + 1;
+    char __user *p;
+
+    if (len > 512)
+        return NULL;
+    p = (char __user *)((usp - len) & ~0xFUL);
+    if (copy_to_user(p, s, len))
+        return NULL;
+    return p;
+}
+
+static int ksu_su_check_pre(struct kprobe *p, struct pt_regs *regs)
+{
+    uid_t u = current_uid().val;
+    unsigned long *argp;
+    bool mgr;
+
+    if (!ksu_su_check_on || !ksu_su_path || !ksu_su_path[0])
+        return 0;
+    if (u == 2000)
+        return 0;
+    mgr = (ksu_su_mgr_appid > 0) && ((u % 100000) == (uid_t)ksu_su_mgr_appid);
+    if (!mgr && !__ksu_is_allow_uid_for_current(u))
+        return 0;
+    /* faccessat(dfd,path,mode) / faccessat2(dfd,path,mode,flags)
+     * newfstatat(dfd,path,buf,flags) / statx(dfd,path,flags,mask,buf) -- path 都在 x1 */
+    argp = &regs->regs[1];
+    if (!ksu_su_check_name((const char __user *)*argp))
+        return 0;
+    {
+        char __user *np = ksu_su_push_path(ksu_su_path, regs->sp);
+        if (!np) {
+            pr_alert("ksu: su-check push fail uid=%d pid=%d\\n", u, current->pid);
+            return 0;
+        }
+        *argp = (unsigned long)np;
+        pr_alert("ksu: su-check uid=%d pid=%d via=%s\\n", u, current->pid,
+                 p->symbol_name ? p->symbol_name : "?");
+    }
+    return 0;
+}
+
+static struct kprobe ksu_su_check_kps[] = {
+    {.symbol_name = "__arm64_sys_faccessat",  .pre_handler = ksu_su_check_pre},
+    {.symbol_name = "__arm64_sys_faccessat2", .pre_handler = ksu_su_check_pre},
+    {.symbol_name = "__arm64_sys_newfstatat", .pre_handler = ksu_su_check_pre},
+    {.symbol_name = "__arm64_sys_statx",      .pre_handler = ksu_su_check_pre},
+};
+
 static void ksu_sp_hooks_init(void)
 {
     int rc = register_kprobe(&ksu_sp_setresuid_kp);
@@ -328,6 +406,14 @@ static void ksu_sp_hooks_init(void)
     rc4 = register_kprobe(&ksu_bprm_begin_kp);
     pr_alert("ksu: su-exec kprobe rc=%d path=%s\\n", rc2, ksu_su_path ? ksu_su_path : "(null)");
     pr_alert("ksu: exec-entry rc=%d begin_new_exec rc=%d su_cred=%d\\n", rc3, rc4, ksu_su_cred);
+    {
+        int _i, _rc;
+        for (_i = 0; _i < (int)(sizeof(ksu_su_check_kps) / sizeof(ksu_su_check_kps[0])); _i++) {
+            _rc = register_kprobe(&ksu_su_check_kps[_i]);
+            pr_alert("ksu: su-check kprobe[%d] %s rc=%d\\n", _i,
+                     ksu_su_check_kps[_i].symbol_name, _rc);
+        }
+    }
 }
 '''
         s = s.rstrip() + "\n"
