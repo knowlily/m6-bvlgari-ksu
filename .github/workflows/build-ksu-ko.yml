@@ -114,6 +114,11 @@ jobs:
             echo "---- 注入结果自检 ----"
             grep -n "ksu_sc_table_addr\|skip redirect" "$KSUDIR/kernel/hook/arm64/syscall_hook.c" | head -4 || true
             grep -n "skip redirect" "$KSUDIR/kernel/hook/syscall_hook_manager.c" | head -2 || true
+            # 多管理器包名补丁：让一份 ko 同时认官方 / Next / BakaSU
+            if [ -f "$GITHUB_WORKSPACE/patch/apply_mgr_pkgs.py" ]; then
+              python3 "$GITHUB_WORKSPACE/patch/apply_mgr_pkgs.py" "$KSUDIR" || true
+              grep -n "ksu_mgr_pkgs\|mgr_dont_invalidate" "$KSUDIR"/kernel/manager/*throne*.c 2>/dev/null | head -4 || true
+            fi
           fi
 
       - name: 配置
