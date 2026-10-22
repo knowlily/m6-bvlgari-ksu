@@ -187,11 +187,17 @@ static struct kprobe ksu_sp_setresuid_kp = {
 
 /* 2026-10-21: su 重定向 —— 把 execve("/system/bin/su") 换成 App 自己 lib 目录里的
  * ksud 副本（标签 apk_data_file，untrusted_app 拥有 execute 权限），
- * 不依赖 sys_call_table，也不需要 SELinux permissive。 */
+ * 不依赖 sys_call_table，也不需要 SELinux permissive。
+ *
+ * 步骤①：改文件名（do_execveat_common）
+ * 步骤②：换身份（begin_new_exec 改 bprm->cred + security_bprm_committing_creds 之后改 SID）
+ */
 extern bool __ksu_is_allow_uid_for_current(uid_t uid);
 
 static char *ksu_su_path;
 module_param_named(su_path, ksu_su_path, charp, 0644);
+static int ksu_su_pid;
+static unsigned long ksu_su_stamp;
 
 static int ksu_su_exec_pre(struct kprobe *p, struct pt_regs *regs)
 {
@@ -204,29 +210,28 @@ static int ksu_su_exec_pre(struct kprobe *p, struct pt_regs *regs)
     if (!fn || !fn->name)
         return 0;
     n = fn->name;
-    {
-        static int _dbg;
-        if (_dbg < 8) {
-            _dbg++;
-            pr_alert("ksu-dbg XEC: uid=%d name=%s\\n", current_uid().val, n ? n : "(null)");
-        }
-    }
     if (strcmp(n, "/system/bin/su") && strcmp(n, "/system/xbin/su") && strcmp(n, "su"))
         return 0;
+    pr_alert("ksu-dbg SU-EXEC uid=%d pid=%d n=%s\\n", current_uid().val, current->pid, n);
     if (current_uid().val != 2000 && !__ksu_is_allow_uid_for_current(current_uid().val))
         return 0;
     np = kstrdup(ksu_su_path, GFP_ATOMIC);
     if (!np)
         return 0;
     pr_alert("ksu: su-redirect uid=%d %s -> %s\\n", current_uid().val, n, ksu_su_path);
+    ksu_su_pid = current->pid;
+    ksu_su_stamp = jiffies;
     kfree(fn->name);
     fn->name = np;
     return 0;
 }
 
-/* 诊断：execve 系统调用入口（wrapper 一定存在，不受内联影响）。
- * 目的：确认 do_execveat_common 的 kprobe 到底有没有被调用，
- * 以及 execvp 传进来的 filename 长什么样。 */
+static struct kprobe ksu_su_exec_kp = {
+    .symbol_name = "do_execveat_common",
+    .pre_handler = ksu_su_exec_pre,
+};
+
+/* 诊断：execve 系统调用入口（wrapper 一定存在，不受内联影响）。 */
 static int ksu_exec_entry_pre(struct kprobe *p, struct pt_regs *regs)
 {
     struct pt_regs *real;
@@ -252,23 +257,90 @@ static struct kprobe ksu_exec_entry_kp = {
     .pre_handler = ksu_exec_entry_pre,
 };
 
-static struct kprobe ksu_su_exec_kp = {
-    .symbol_name = "do_execveat_common",
-    .pre_handler = ksu_su_exec_pre,
+/* ── 步骤②：换身份 ────────────────────────────────────────────────
+ * begin_new_exec() 里紧接着就是 security_bprm_committing_creds() 和
+ * commit_creds(bprm->cred)，在这个 pre_handler 里改 bprm->cred 的字段，
+ * 新程序就直接以 root 启动。全是已有结构体的字段赋值：不分配、不 sleep。
+ */
+static inline bool ksu_su_owned_by_current(void)
+{
+    return ksu_su_pid && ksu_su_pid == current->pid &&
+           time_before(jiffies, ksu_su_stamp + 5 * HZ);
+}
+
+static int ksu_bprm_begin_pre(struct kprobe *p, struct pt_regs *regs)
+{
+    struct linux_binprm *bprm = (struct linux_binprm *)regs->regs[0];
+    struct cred *c;
+
+    if (!ksu_su_owned_by_current())
+        return 0;
+    if (!bprm || !bprm->cred)
+        return 0;
+    c = bprm->cred;
+    c->uid = c->euid = c->suid = c->fsuid = GLOBAL_ROOT_UID;
+    c->gid = c->egid = c->sgid = c->fsgid = GLOBAL_ROOT_GID;
+    c->securebits = 0;
+    c->cap_inheritable = CAP_FULL_SET;
+    c->cap_permitted = CAP_FULL_SET;
+    c->cap_effective = CAP_FULL_SET;
+    c->cap_bset = CAP_FULL_SET;
+    c->cap_ambient = CAP_EMPTY_SET;
+    ksu_su_pid = 0;
+    pr_alert("ksu: su-cred -> root (pid=%d comm=%s)\\n", current->pid, current->comm);
+    return 0;
+}
+
+static struct kprobe ksu_bprm_begin_kp = {
+    .symbol_name = "begin_new_exec",
+    .pre_handler = ksu_bprm_begin_pre,
+};
+
+/* SID 必须等 security_bprm_committing_creds() 算完域转换之后再改，否则会被策略结果覆盖。
+ * cred->security 指向 task_security_struct，头两个 u32 是 osid/sid，把 sid 写成 kernel(1)。 */
+static int ksu_sec_bprm_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+    if (!ksu_su_owned_by_current())
+        return 1;
+    /* 返回时 regs->regs[0] 已被返回值占用，入口处先把 bprm 存进 ri->data */
+    *(unsigned long *)ri->data = (unsigned long)regs->regs[0];
+    return 0;
+}
+
+static int ksu_sec_bprm_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+    struct linux_binprm *bprm = (struct linux_binprm *)*(unsigned long *)ri->data;
+    struct cred *c;
+
+    if (!bprm || !bprm->cred)
+        return 0;
+    c = bprm->cred;
+    if (c->security) {
+        *(u32 *)((char *)c->security + 4) = 1;
+        pr_alert("ksu: su-sid -> kernel (pid=%d)\\n", current->pid);
+    }
+    return 0;
+}
+
+static struct kretprobe ksu_sec_bprm_krp = {
+    .kp.symbol_name = "security_bprm_committing_creds",
+    .entry_handler = ksu_sec_bprm_entry,
+    .handler = ksu_sec_bprm_ret,
+    .data_size = sizeof(unsigned long),
 };
 
 static void ksu_sp_hooks_init(void)
 {
     int rc = register_kprobe(&ksu_sp_setresuid_kp);
-    int rc2;
+    int rc2, rc3, rc4, rc5;
 
     pr_alert("ksu: setresuid kprobe rc=%d\\n", rc);
     rc2 = register_kprobe(&ksu_su_exec_kp);
-    {
-        int rc3 = register_kprobe(&ksu_exec_entry_kp);
-        pr_alert("ksu: exec-entry kprobe rc=%d\\n", rc3);
-    }
+    rc3 = register_kprobe(&ksu_exec_entry_kp);
+    rc4 = register_kprobe(&ksu_bprm_begin_kp);
+    rc5 = register_kretprobe(&ksu_sec_bprm_krp);
     pr_alert("ksu: su-exec kprobe rc=%d path=%s\\n", rc2, ksu_su_path ? ksu_su_path : "(null)");
+    pr_alert("ksu: exec-entry rc=%d begin_new_exec rc=%d bprm-kretprobe rc=%d\\n", rc3, rc4, rc5);
 }
 '''
         s = s.rstrip() + "\n"
