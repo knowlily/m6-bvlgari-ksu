@@ -360,7 +360,7 @@ static char __user *ksu_su_push_path(const char *s, unsigned long usp)
 static int ksu_su_check_pre(struct kprobe *p, struct pt_regs *regs)
 {
     uid_t u = current_uid().val;
-    unsigned long *argp;
+    u64 *argp;   /* arm64 的 pt_regs.regs 是 u64[]，用 unsigned long* 会类型不兼容 */
     bool mgr;
 
     if (!ksu_su_check_on || !ksu_su_path || !ksu_su_path[0])
