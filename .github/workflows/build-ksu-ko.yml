@@ -118,6 +118,8 @@ jobs:
             if [ -f "$GITHUB_WORKSPACE/patch/apply_mgr_pkgs.py" ]; then
               python3 "$GITHUB_WORKSPACE/patch/apply_mgr_pkgs.py" "$KSUDIR" || true
               grep -n "ksu_mgr_pkgs\|mgr_dont_invalidate" "$KSUDIR"/kernel/manager/*throne*.c 2>/dev/null | head -4 || true
+              # 自检：KSU_PACKAGE_NAME 在 Next/BakaSU 里没有，补丁必须自带兜底定义，否则编译必挂
+              grep -n "ifndef KSU_PACKAGE_NAME" "$KSUDIR"/kernel/manager/*throne*.c 2>/dev/null | head -2 || echo "!! 缺少 KSU_PACKAGE_NAME 兜底定义"
             fi
           fi
 

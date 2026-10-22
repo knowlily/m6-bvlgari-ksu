@@ -22,7 +22,14 @@ BLOCK = r'''
 /* ── m6 补丁：多管理器包名 ──────────────────────────────────────────
  * loader 通过 mgr_pkgs=a,b,c 注入；留空则退回编译期 KSU_PACKAGE_NAME。
  * 这样一份 ko 能同时认官方 / Next / BakaSU 等多个管理器。
+ *
+ * 注意：Next / BakaSU 的 throne_tracker.c 里没有 KSU_PACKAGE_NAME 这个宏
+ * （它们的管理器识别走别的路径），而我们下面要引用它，所以这里必须有兜底定义，
+ * 否则那两个分支会直接编译失败：use of undeclared identifier 'KSU_PACKAGE_NAME'。
  */
+#ifndef KSU_PACKAGE_NAME
+#define KSU_PACKAGE_NAME "me.weishu.kernelsu"
+#endif
 static char *ksu_mgr_pkgs;
 module_param_named(mgr_pkgs, ksu_mgr_pkgs, charp, 0644);
 static bool ksu_mgr_dont_invalidate = true;
