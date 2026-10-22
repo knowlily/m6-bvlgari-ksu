@@ -209,7 +209,7 @@ static int ksu_su_pid;
  * 它内部 prepare_creds() 是 GFP_KERNEL，kprobe 的原子上下文里不能调。
  * 所以 kprobe 只排队一个 task_work，真正提权在 exit_to_user_mode 之前跑，那里可以睡眠。
  * 弱引用：某些分支可能没有这个函数，弱引用为 NULL 时只打日志、不做事。 */
-extern int escape_with_root_profile(void) __attribute__((weak));
+extern int escape_with_root_profile(void);
 
 struct ksu_su_tw {
     struct callback_head cb;
@@ -221,12 +221,8 @@ static void ksu_su_tw_fn(struct callback_head *head)
     struct ksu_su_tw *tw = container_of(head, struct ksu_su_tw, cb);
 
     if (tw->pid == current->pid) {
-        if (escape_with_root_profile) {
-            int r = escape_with_root_profile();
-            pr_alert("ksu: su-twerk escape pid=%d rc=%d\\n", tw->pid, r);
-        } else {
-            pr_alert("ksu: su-twerk 本分支没有 escape_with_root_profile\\n");
-        }
+        int r = escape_with_root_profile();
+        pr_alert("ksu: su-twerk escape pid=%d rc=%d\\n", tw->pid, r);
     }
     kfree(tw);
 }\n/* 步骤②默认开，可 su_cred=0 关掉做 A/B。原来还有个 kretprobe 往 cred->security+4\n * 盲写 SID=kernel —— 那是对 SELinux 私有结构体的野写，已删除。 */\nstatic int ksu_su_cred = 1;\nmodule_param_named(su_cred, ksu_su_cred, int, 0644);
