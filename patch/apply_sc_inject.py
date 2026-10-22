@@ -360,6 +360,13 @@ static struct kprobe ksu_bprm_begin_kp = {
  * 只对 allowlist / 管理器 uid 生效，别的进程连一次 strlen 都不做。 */
 static int ksu_su_check_on = 1;
 module_param_named(su_check, ksu_su_check_on, int, 0644);
+/* 调试：对指定 uid 的每一次 access/stat 调用都打日志（含路径）。
+ * 2026-10-22：真机上 su-check 一次都没命中，却不知道是「钩子没触发」还是
+ * 「触发了但路径不同」——留这个旋钮直接看原始调用，别靠猜。 */
+static int ksu_su_dbg_on = 0;
+module_param_named(su_dbg, ksu_su_dbg_on, int, 0644);
+static int ksu_su_dbg_uid = 0;
+module_param_named(su_dbg_uid, ksu_su_dbg_uid, int, 0644);
 
 static int ksu_su_check_name(const char __user *ufn)
 {
@@ -399,6 +406,19 @@ static int ksu_su_check_pre(struct kprobe *p, struct pt_regs *regs)
 
     if (!ksu_su_check_on || !ksu_su_path || !ksu_su_path[0])
         return 0;
+    argp = &regs->regs[1];
+    if (ksu_su_dbg_on && (int)u == ksu_su_dbg_uid) {
+        char db[48];
+        long dr = strncpy_from_user_nofault(db, (const char __user *)*argp, sizeof(db) - 1);
+        if (dr > 0) {
+            db[dr] = 0;
+            pr_alert("ksu: dbg-check uid=%d %s %s\\n", u,
+                     p->symbol_name ? p->symbol_name : "?", db);
+        } else {
+            pr_alert("ksu: dbg-check uid=%d %s <unreadable>\\n", u,
+                     p->symbol_name ? p->symbol_name : "?");
+        }
+    }
     if (u == 2000)
         return 0;
     /* uid 0 必须放行：aShell 的 root shell 早就是 root 了，从它里面敲 su
@@ -409,7 +429,6 @@ static int ksu_su_check_pre(struct kprobe *p, struct pt_regs *regs)
         return 0;
     /* faccessat(dfd,path,mode) / faccessat2(dfd,path,mode,flags)
      * newfstatat(dfd,path,buf,flags) / statx(dfd,path,flags,mask,buf) -- path 都在 x1 */
-    argp = &regs->regs[1];
     if (!ksu_su_check_name((const char __user *)*argp))
         return 0;
     {
@@ -430,6 +449,9 @@ static struct kprobe ksu_su_check_kps[] = {
     {.symbol_name = "__arm64_sys_faccessat2", .pre_handler = ksu_su_check_pre},
     {.symbol_name = "__arm64_sys_newfstatat", .pre_handler = ksu_su_check_pre},
     {.symbol_name = "__arm64_sys_statx",      .pre_handler = ksu_su_check_pre},
+    /* 兜底：万一 bionic 的入口不叫 __arm64_sys_*，这两个是 VFS 层必经点 */
+    {.symbol_name = "do_faccessat",           .pre_handler = ksu_su_check_pre},
+    {.symbol_name = "vfs_statx",              .pre_handler = ksu_su_check_pre},
 };
 
 static void ksu_sp_hooks_init(void)
