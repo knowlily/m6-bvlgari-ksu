@@ -14,6 +14,7 @@
 """
 import glob
 import os
+import re
 import sys
 
 MARKER = "ksu_mgr_pkgs"          # 幂等标记
@@ -158,10 +159,19 @@ def patch_file(path):
     anchor = "static void crown_manager("
     if anchor in src:
         src = src.replace(anchor, BLOCK + anchor, 1)
-        src, ok = _replace_func(src, "static void crown_manager(const char *apk", CROWN)
-        print(f"[mgr-pkgs] crown_manager 顺序敏感替换: {'OK' if ok else '未命中'}")
-        if not ok:
-            print(f"[mgr-pkgs] {path}: 没找到 crown_manager 定义，加冕顺序未修")
+        # ★ 只对"2 参数"的 crown_manager 做整只替换。BakaSU 的是
+        #   crown_manager(const char *apk, struct list_head *uid_data, u8 signature_index)
+        #   且完全不用 KSU_PACKAGE_NAME（它按 apk 路径推包名 + 签名索引加冕），
+        #   硬替换会变成 "too many arguments to function call, expected 2, have 3"。
+        m = re.search(r"static void crown_manager\(([^)]*)\)", src)
+        nparams = 0 if not m else len([x for x in m.group(1).split(",") if x.strip()])
+        if nparams == 2:
+            src, ok = _replace_func(src, "static void crown_manager(const char *apk", CROWN)
+            print(f"[mgr-pkgs] crown_manager 顺序敏感替换: {'OK' if ok else '未命中'}")
+            if not ok:
+                print(f"[mgr-pkgs] {path}: 没找到 crown_manager 定义，加冕顺序未修")
+        else:
+            print(f"[mgr-pkgs] crown_manager 有 {nparams} 个参数，跳过顺序敏感替换（该分支按 apk 签名认管理器）")
     else:
         idx = src.find("#define")
         if idx < 0:
