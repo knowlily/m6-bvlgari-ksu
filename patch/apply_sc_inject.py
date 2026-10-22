@@ -164,7 +164,6 @@ module_param_named(kimg_voff, ksu_kimg_voff_addr, ulong, 0644);""", 1)
 #include <linux/uaccess.h>
 #include <linux/cred.h>
 #include <linux/capability.h>
-#include <linux/jiffies.h>
 #include <linux/binfmts.h>
 #include <linux/cred.h>
 #include <linux/sched.h>
@@ -201,7 +200,6 @@ extern bool __ksu_is_allow_uid_for_current(uid_t uid);
 static char *ksu_su_path;
 module_param_named(su_path, ksu_su_path, charp, 0644);
 static int ksu_su_pid;
-static unsigned long ksu_su_stamp;
 
 static int ksu_su_exec_pre(struct kprobe *p, struct pt_regs *regs)
 {
@@ -224,7 +222,6 @@ static int ksu_su_exec_pre(struct kprobe *p, struct pt_regs *regs)
         return 0;
     pr_alert("ksu: su-redirect uid=%d %s -> %s\\n", current_uid().val, n, ksu_su_path);
     ksu_su_pid = current->pid;
-    ksu_su_stamp = jiffies;
     kfree(fn->name);
     fn->name = np;
     return 0;
@@ -266,10 +263,11 @@ static struct kprobe ksu_exec_entry_kp = {
  * commit_creds(bprm->cred)，在这个 pre_handler 里改 bprm->cred 的字段，
  * 新程序就直接以 root 启动。全是已有结构体的字段赋值：不分配、不 sleep。
  */
+/* 只比 pid：从 do_execveat_common 到 begin_new_exec 是同一次系统调用内部，
+ * 窗口是微秒级，pid 不可能被复用；不用 jiffies 是为了不引入新的未定义符号。 */
 static inline bool ksu_su_owned_by_current(void)
 {
-    return ksu_su_pid && ksu_su_pid == current->pid &&
-           time_before(jiffies, ksu_su_stamp + 5 * HZ);
+    return ksu_su_pid && ksu_su_pid == current->pid;
 }
 
 static int ksu_bprm_begin_pre(struct kprobe *p, struct pt_regs *regs)
