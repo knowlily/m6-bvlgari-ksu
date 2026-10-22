@@ -164,7 +164,7 @@ module_param_named(kimg_voff, ksu_kimg_voff_addr, ulong, 0644);""", 1)
 #include <linux/uaccess.h>
 #include <linux/cred.h>
 #include <linux/capability.h>
-#include <linux/binfmts.h>\n#include <linux/limits.h>
+#include <linux/binfmts.h>\n#include <linux/limits.h>\n#include <linux/task_work.h>
 #include <linux/cred.h>
 #include <linux/sched.h>
 
@@ -204,7 +204,32 @@ module_param_named(su_mgr_appid, ksu_su_mgr_appid, int, 0644);
 
 static char *ksu_su_path;
 module_param_named(su_path, ksu_su_path, charp, 0644);
-static int ksu_su_pid;\n/* 步骤②默认开，可 su_cred=0 关掉做 A/B。原来还有个 kretprobe 往 cred->security+4\n * 盲写 SID=kernel —— 那是对 SELinux 私有结构体的野写，已删除。 */\nstatic int ksu_su_cred = 1;\nmodule_param_named(su_cred, ksu_su_cred, int, 0644);
+static int ksu_su_pid;
+/* 换域（SELinux SID）只能交给 KSU 自己的 escape_with_root_profile()：
+ * 它内部 prepare_creds() 是 GFP_KERNEL，kprobe 的原子上下文里不能调。
+ * 所以 kprobe 只排队一个 task_work，真正提权在 exit_to_user_mode 之前跑，那里可以睡眠。
+ * 弱引用：某些分支可能没有这个函数，弱引用为 NULL 时只打日志、不做事。 */
+extern int escape_with_root_profile(void) __attribute__((weak));
+
+struct ksu_su_tw {
+    struct callback_head cb;
+    int pid;
+};
+
+static void ksu_su_tw_fn(struct callback_head *head)
+{
+    struct ksu_su_tw *tw = container_of(head, struct ksu_su_tw, cb);
+
+    if (tw->pid == current->pid) {
+        if (escape_with_root_profile) {
+            int r = escape_with_root_profile();
+            pr_alert("ksu: su-twerk escape pid=%d rc=%d\\n", tw->pid, r);
+        } else {
+            pr_alert("ksu: su-twerk 本分支没有 escape_with_root_profile\\n");
+        }
+    }
+    kfree(tw);
+}\n/* 步骤②默认开，可 su_cred=0 关掉做 A/B。原来还有个 kretprobe 往 cred->security+4\n * 盲写 SID=kernel —— 那是对 SELinux 私有结构体的野写，已删除。 */\nstatic int ksu_su_cred = 1;\nmodule_param_named(su_cred, ksu_su_cred, int, 0644);
 
 static int ksu_su_exec_pre(struct kprobe *p, struct pt_regs *regs)
 {
@@ -296,6 +321,19 @@ static int ksu_bprm_begin_pre(struct kprobe *p, struct pt_regs *regs)
         return 0;
     if (!ksu_su_owned_by_current())
         return 0;
+    if (ksu_su_cred == 2) {
+        struct ksu_su_tw *tw = kmalloc(sizeof(*tw), GFP_ATOMIC);
+        if (!tw)
+            return 0;
+        tw->pid = current->pid;
+        init_task_work(&tw->cb, ksu_su_tw_fn);
+        if (task_work_add(current, &tw->cb, TWA_RESUME)) {
+            kfree(tw);
+            return 0;
+        }
+        pr_alert("ksu: su-cred -> 排队 task_work（改域交给 escape_with_root_profile）\\n");
+        return 0;
+    }
     if (!bprm || !bprm->cred)
         return 0;
     c = bprm->cred;
