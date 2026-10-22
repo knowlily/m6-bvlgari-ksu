@@ -249,7 +249,7 @@ static int ksu_su_exec_pre(struct kprobe *p, struct pt_regs *regs)
          * 本来就该有 root —— 不放行的话，管理器自己的 su 永远走不到重定向。
          * 注意这里只影响"文件名改写"；真正换 cred 的步骤②仍按 pid 认领，
          * 且 ① 之外还有 allowlist/manager 两道门，普通 App 不会因此拿到 root。 */
-        bool _mgr = (ksu_su_mgr_appid > 0) && (_u % 100000 == (uid_t)ksu_su_mgr_appid);
+        bool _mgr = (_u == 0) || ((ksu_su_mgr_appid > 0) && (_u % 100000 == (uid_t)ksu_su_mgr_appid));
         pr_alert("ksu-dbg SU-EXEC uid=%d pid=%d mgr=%d n=%s\\n", _u, current->pid, (int)_mgr, n);
         if (_u == 2000)
             return 0;
@@ -405,7 +405,10 @@ static int ksu_su_check_pre(struct kprobe *p, struct pt_regs *regs)
         return 0;
     if (u == 2000)
         return 0;
-    mgr = (ksu_su_mgr_appid > 0) && ((u % 100000) == (uid_t)ksu_su_mgr_appid);
+    /* uid 0 必须放行：aShell 的 root shell 早就是 root 了，从它里面敲 su
+     * 就是「root 进程去 access(/system/bin/su)」—— 之前这里把它挡了，
+     * 于是 0 次命中、shell 照旧报 inaccessible or not found。 */
+    mgr = (u == 0) || ((ksu_su_mgr_appid > 0) && ((u % 100000) == (uid_t)ksu_su_mgr_appid));
     if (!mgr && !__ksu_is_allow_uid_for_current(u))
         return 0;
     /* faccessat(dfd,path,mode) / faccessat2(dfd,path,mode,flags)
