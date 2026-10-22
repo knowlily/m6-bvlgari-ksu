@@ -196,8 +196,11 @@ static struct kprobe ksu_sp_setresuid_kp = {
  * 步骤②：换身份（begin_new_exec 改 bprm->cred + security_bprm_committing_creds 之后改 SID）
  */
 extern bool __ksu_is_allow_uid_for_current(uid_t uid);
-/* 管理器 uid（manager/manager_identity.h 的全局）；只读，用来放行管理器自己的 su */
-extern uid_t ksu_manager_appid;
+/* 管理器 uid 由 loader 通过模块参数传进来。
+ * 不要引用内核里的 ksu_manager_appid —— BakaSU 分支没有这个全局，引用它会变成
+ * 未解析外部符号，ko_patch2 查清单查不到就整体 ABORT（真机踩过）。 */
+static int ksu_su_mgr_appid = -1;
+module_param_named(su_mgr_appid, ksu_su_mgr_appid, int, 0644);
 
 static char *ksu_su_path;
 module_param_named(su_path, ksu_su_path, charp, 0644);
@@ -222,7 +225,7 @@ static int ksu_su_exec_pre(struct kprobe *p, struct pt_regs *regs)
          * 本来就该有 root —— 不放行的话，管理器自己的 su 永远走不到重定向。
          * 注意这里只影响"文件名改写"；真正换 cred 的步骤②仍按 pid 认领，
          * 且 ① 之外还有 allowlist/manager 两道门，普通 App 不会因此拿到 root。 */
-        bool _mgr = (ksu_manager_appid != (uid_t)-1) && (_u % 100000 == ksu_manager_appid);
+        bool _mgr = (ksu_su_mgr_appid > 0) && (_u % 100000 == (uid_t)ksu_su_mgr_appid);
         pr_alert("ksu-dbg SU-EXEC uid=%d pid=%d mgr=%d n=%s\\n", _u, current->pid, (int)_mgr, n);
         if (_u == 2000)
             return 0;
