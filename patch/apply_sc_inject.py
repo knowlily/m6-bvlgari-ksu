@@ -164,7 +164,7 @@ module_param_named(kimg_voff, ksu_kimg_voff_addr, ulong, 0644);""", 1)
 #include <linux/uaccess.h>
 #include <linux/cred.h>
 #include <linux/capability.h>
-#include <linux/binfmts.h>
+#include <linux/binfmts.h>\n#include <linux/limits.h>
 #include <linux/cred.h>
 #include <linux/sched.h>
 
@@ -204,13 +204,12 @@ module_param_named(su_mgr_appid, ksu_su_mgr_appid, int, 0644);
 
 static char *ksu_su_path;
 module_param_named(su_path, ksu_su_path, charp, 0644);
-static int ksu_su_pid;
+static int ksu_su_pid;\n/* 步骤②默认开，可 su_cred=0 关掉做 A/B。原来还有个 kretprobe 往 cred->security+4\n * 盲写 SID=kernel —— 那是对 SELinux 私有结构体的野写，已删除。 */\nstatic int ksu_su_cred = 1;\nmodule_param_named(su_cred, ksu_su_cred, int, 0644);
 
 static int ksu_su_exec_pre(struct kprobe *p, struct pt_regs *regs)
 {
     struct filename *fn = (struct filename *)regs->regs[1];
     const char *n;
-    char *np;
 
     if (!ksu_su_path || !ksu_su_path[0])
         return 0;
@@ -232,13 +231,16 @@ static int ksu_su_exec_pre(struct kprobe *p, struct pt_regs *regs)
         if (!_mgr && !__ksu_is_allow_uid_for_current(_u))
             return 0;
     }
-    np = kstrdup(ksu_su_path, GFP_ATOMIC);
-    if (!np)
+    /* ★ 绝不能 kfree(fn->name)：短路径时 getname_flags() 把名字放进 struct filename
+     * 内嵌的 iname[] 里，fn->name 指向结构体内部 —— kfree 它属于非法释放，
+     * 会破坏 slab，过一阵才 panic（2026-10-22 真机就是这么崩的）。
+     * 改成原地覆盖：内嵌缓冲约 PATH_MAX，长路径分支也是 kmalloc(PATH_MAX)，
+     * 都放得下 App 里的 lib 路径；超长则直接放弃重定向，一个指针都不动。 */
+    if (strlen(ksu_su_path) >= PATH_MAX)
         return 0;
-    pr_alert("ksu: su-redirect uid=%d %s -> %s\\n", current_uid().val, n, ksu_su_path);
+    memcpy((char *)fn->name, ksu_su_path, strlen(ksu_su_path) + 1);
     ksu_su_pid = current->pid;
-    kfree(fn->name);
-    fn->name = np;
+    pr_alert("ksu: su-redirect uid=%d %s -> %s\\n", current_uid().val, n, ksu_su_path);
     return 0;
 }
 
@@ -290,6 +292,8 @@ static int ksu_bprm_begin_pre(struct kprobe *p, struct pt_regs *regs)
     struct linux_binprm *bprm = (struct linux_binprm *)regs->regs[0];
     struct cred *c;
 
+    if (!ksu_su_cred)
+        return 0;
     if (!ksu_su_owned_by_current())
         return 0;
     if (!bprm || !bprm->cred)
@@ -313,51 +317,17 @@ static struct kprobe ksu_bprm_begin_kp = {
     .pre_handler = ksu_bprm_begin_pre,
 };
 
-/* SID 必须等 security_bprm_committing_creds() 算完域转换之后再改，否则会被策略结果覆盖。
- * cred->security 指向 task_security_struct，头两个 u32 是 osid/sid，把 sid 写成 kernel(1)。 */
-static int ksu_sec_bprm_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
-{
-    if (!ksu_su_owned_by_current())
-        return 1;
-    /* 返回时 regs->regs[0] 已被返回值占用，入口处先把 bprm 存进 ri->data */
-    *(unsigned long *)ri->data = (unsigned long)regs->regs[0];
-    return 0;
-}
-
-static int ksu_sec_bprm_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
-{
-    struct linux_binprm *bprm = (struct linux_binprm *)*(unsigned long *)ri->data;
-    struct cred *c;
-
-    if (!bprm || !bprm->cred)
-        return 0;
-    c = bprm->cred;
-    if (c->security) {
-        *(u32 *)((char *)c->security + 4) = 1;
-        pr_alert("ksu: su-sid -> kernel (pid=%d)\\n", current->pid);
-    }
-    return 0;
-}
-
-static struct kretprobe ksu_sec_bprm_krp = {
-    .kp.symbol_name = "security_bprm_committing_creds",
-    .entry_handler = ksu_sec_bprm_entry,
-    .handler = ksu_sec_bprm_ret,
-    .data_size = sizeof(unsigned long),
-};
-
 static void ksu_sp_hooks_init(void)
 {
     int rc = register_kprobe(&ksu_sp_setresuid_kp);
-    int rc2, rc3, rc4, rc5;
+    int rc2, rc3, rc4;
 
     pr_alert("ksu: setresuid kprobe rc=%d\\n", rc);
     rc2 = register_kprobe(&ksu_su_exec_kp);
     rc3 = register_kprobe(&ksu_exec_entry_kp);
     rc4 = register_kprobe(&ksu_bprm_begin_kp);
-    rc5 = register_kretprobe(&ksu_sec_bprm_krp);
     pr_alert("ksu: su-exec kprobe rc=%d path=%s\\n", rc2, ksu_su_path ? ksu_su_path : "(null)");
-    pr_alert("ksu: exec-entry rc=%d begin_new_exec rc=%d bprm-kretprobe rc=%d\\n", rc3, rc4, rc5);
+    pr_alert("ksu: exec-entry rc=%d begin_new_exec rc=%d su_cred=%d\\n", rc3, rc4, ksu_su_cred);
 }
 '''
         s = s.rstrip() + "\n"
