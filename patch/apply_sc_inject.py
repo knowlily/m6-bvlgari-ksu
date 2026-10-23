@@ -412,15 +412,35 @@ static char __user *ksu_su_push_path(const char *s, unsigned long usp)
     return p;
 }
 
+/* ★ 2026-10-23 真机结论（第二次）：arm64 上 SYSCALL_DEFINEx 生成的
+ * __arm64_sys_* 只收一个参数 —— struct pt_regs *。所以在这些包装函数的入口，
+ * x0 是 pt_regs 指针，真正的 syscall 参数在它里面；直接读 x1 拿到的是垃圾，
+ * copy_from_user_nofault 必然 -EFAULT（日志里清一色 <unreadable>）。
+ * do_faccessat / vfs_statx 是普通函数，参数就在 x1，不能一视同仁。 */
+static struct pt_regs *ksu_su_real_regs(struct kprobe *p, struct pt_regs *regs)
+{
+    if (p->symbol_name && !strncmp(p->symbol_name, "__arm64_sys_", 12)) {
+        struct pt_regs *rp = (struct pt_regs *)regs->regs[0];
+        return rp ? rp : NULL;
+    }
+    return regs;
+}
+
 static int ksu_su_check_pre(struct kprobe *p, struct pt_regs *regs)
 {
     uid_t u = current_uid().val;
+    struct pt_regs *rp;
     u64 *argp;   /* arm64 的 pt_regs.regs 是 u64[]，用 unsigned long* 会类型不兼容 */
+    unsigned long usp;
     bool mgr;
 
     if (!ksu_su_check_on || !ksu_su_path || !ksu_su_path[0])
         return 0;
-    argp = &regs->regs[1];
+    rp = ksu_su_real_regs(p, regs);
+    if (!rp)
+        return 0;
+    argp = &rp->regs[1];
+    usp = rp->sp;
     if (ksu_su_dbg_on && (int)u == ksu_su_dbg_uid) {
         char db[48];
         if (ksu_su_read_user(db, sizeof(db), (const void __user *)*argp) >= 0) {
@@ -444,7 +464,7 @@ static int ksu_su_check_pre(struct kprobe *p, struct pt_regs *regs)
     if (!ksu_su_check_name((const char __user *)*argp))
         return 0;
     {
-        char __user *np = ksu_su_push_path(ksu_su_path, regs->sp);
+        char __user *np = ksu_su_push_path(ksu_su_path, usp);
         if (!np) {
             pr_alert("ksu: su-check push fail uid=%d pid=%d\\n", u, current->pid);
             return 0;
