@@ -368,17 +368,29 @@ module_param_named(su_dbg, ksu_su_dbg_on, int, 0644);
 static int ksu_su_dbg_uid = 0;
 module_param_named(su_dbg_uid, ksu_su_dbg_uid, int, 0644);
 
+/* ★ 2026-10-23 真机结论：kprobe 里 strncpy_from_user_nofault() 在本机一律失败
+ * （返回 -EFAULT，日志里全是 <unreadable>），而 copy_from_user_nofault() 在同一
+ * 上下文是好的（exec 钩子就是这么读文件名的，路径打得出来）。所以这里统一用后者
+ * 手工截断。这一条解释了「钩子挂上 rc=0、路径也匹配，却一次都没命中」的全过程。 */
+static int ksu_su_read_user(char *dst, int n, const void __user *src)
+{
+    if (!src || n < 2)
+        return -1;
+    memset(dst, 0, n);
+    if (copy_from_user_nofault(dst, src, n - 1))
+        return -1;
+    dst[n - 1] = 0;
+    return (int)strlen(dst);
+}
+
 static int ksu_su_check_name(const char __user *ufn)
 {
     char buf[32];
-    long r;
 
     if (!ufn)
         return 0;
-    r = strncpy_from_user_nofault(buf, ufn, sizeof(buf) - 1);
-    if (r <= 0)
+    if (ksu_su_read_user(buf, sizeof(buf), (const void __user *)ufn) <= 0)
         return 0;
-    buf[r] = 0;
     return !strcmp(buf, "/system/bin/su") || !strcmp(buf, "/system/xbin/su") ||
            !strcmp(buf, "/sbin/su") || !strcmp(buf, "su");
 }
@@ -393,8 +405,10 @@ static char __user *ksu_su_push_path(const char *s, unsigned long usp)
     if (len > 512)
         return NULL;
     p = (char __user *)((usp - len) & ~0xFUL);
-    if (copy_to_user(p, s, len))
+    if (copy_to_user_nofault(p, s, len)) {
+        pr_alert("ksu: su-push fail len=%zu usp=%lx\n", len, usp);
         return NULL;
+    }
     return p;
 }
 
@@ -409,9 +423,7 @@ static int ksu_su_check_pre(struct kprobe *p, struct pt_regs *regs)
     argp = &regs->regs[1];
     if (ksu_su_dbg_on && (int)u == ksu_su_dbg_uid) {
         char db[48];
-        long dr = strncpy_from_user_nofault(db, (const char __user *)*argp, sizeof(db) - 1);
-        if (dr > 0) {
-            db[dr] = 0;
+        if (ksu_su_read_user(db, sizeof(db), (const void __user *)*argp) >= 0) {
             pr_alert("ksu: dbg-check uid=%d %s %s\\n", u,
                      p->symbol_name ? p->symbol_name : "?", db);
         } else {
