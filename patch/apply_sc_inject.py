@@ -376,6 +376,11 @@ static int ksu_su_read_user(char *dst, int n, const void __user *src)
 {
     if (!src || n < 2)
         return -1;
+    /* ★ 2026-10-23：App 进程（MTE 开启）的用户指针最高字节带标签，
+     * access_ok() 会把它判成越界直接 -EFAULT —— 真机表现就是同一个钩子
+     * 对 adb shell(uid 2000) 能读出路径、对 App(uid 10244) 全是 <unreadable>。
+     * 读之前统一砍掉高字节；没开 MTE 的指针高字节本来就是 0，无副作用。 */
+    src = (const void __user *)((unsigned long)src & ~0xFF00000000000000UL);
     memset(dst, 0, n);
     if (copy_from_user_nofault(dst, src, n - 1))
         return -1;
@@ -444,8 +449,8 @@ static int ksu_su_check_pre(struct kprobe *p, struct pt_regs *regs)
     if (ksu_su_dbg_on && (int)u == ksu_su_dbg_uid) {
         char db[48];
         if (ksu_su_read_user(db, sizeof(db), (const void __user *)*argp) >= 0) {
-            pr_alert("ksu: dbg-check uid=%d %s %s\\n", u,
-                     p->symbol_name ? p->symbol_name : "?", db);
+            pr_alert("ksu: dbg-check uid=%d %s ptr=%lx %s\\n", u,
+                     p->symbol_name ? p->symbol_name : "?", (unsigned long)*argp, db);
         } else {
             pr_alert("ksu: dbg-check uid=%d %s <unreadable>\\n", u,
                      p->symbol_name ? p->symbol_name : "?");
