@@ -36,19 +36,42 @@ MagicOS10.0-ROM-Bvlgari_MagicOS10.0_Code_Opensource
 - `strings kernelsu.ko | grep vermagic` 必须是 `6.1.157-android14-11-g7d3922fade43 ...`
 - 装到设备后：`dmesg | grep -i "sucompat"` 出现 `direct syscall-table hooks installed` 或 `sucompat-kp` 注册成功
 
-## 版本策略（2026-10-19 起）
+## 版本策略（2026-10-24 起：uapi 5 / 6 并存）
 
-**只做 uapi 5。** uapi 4 / uapi 2 的构建全部作废，不再维护。
+**核心原则：一份 ko 只配一个管理器。** 管理器启动时会比对 `KERNEL_SU_UAPI_VERSION`，
+不相等就显示「需要更新内核」或 ioctl 全部被拒。所以「多管理器支持」= 按管理器出多个 ko 文件，
+不是一份 ko 通吃。
 
-| 源码 | uapi | 配套管理器 |
-|---|---|---|
-| `Baka-SU/BakaSU` `main` | 5 | BakaSU `35234` |
-| `tiann/KernelSU` `v3.3.1` | 5 | 官方 `32680` |
+| ko 文件 | 源码 / tag | uapi | 配套管理器 | 状态 |
+|---|---|---|---|---|
+| `kernelsu_ksu331.ko` | `tiann/KernelSU` `v3.3.1` | 5 | 官方 `me.weishu.kernelsu` 32680+ | 维护 |
+| `kernelsu_next.ko` | `KernelSU-Next/KernelSU-Next` `v3.4.2` | 5 | Next（伪装包名 `kqvdie.zeykvw.hpbcyd`） | 维护 |
+| `kernelsu_custom.ko` | `Baka-SU/BakaSU` `main` | 5 | BakaSU `com.bakasu.bakasu` 35234 | 维护 |
+| `kernelsu_sukisu.ko` | `SukiSU-Ultra/SukiSU-Ultra` `v4.2.1-r1` | **6** | SukiSU `com.sukisu.ultra` 41049 | 新增（待真机验收） |
+| `kernelsu_finasu.ko` | `LyraVoid/FinaSU` `v1.0.7` | **6** | FinaSU `me.yuki.fina` 32997 | 新增（待真机验收） |
+| `kernelsu-os9-selx11.ko` | 旧作者线（BakaSU 4.1.0 代） | 4 | ReSukiSU / BakaSU 旧版 | 兜底，不再升级 |
+| `kernelsu_success.ko` | KernelSU 3.2.5 快照（6.1.128） | 2 | — | 仅 A/B 对照 |
 
-已废弃：
+已废弃：`tiann v3.2.5/v3.3.0` → uapi 2；`BakaSU v4.2.0-rc3` → uapi 4。
 
-- `tiann/KernelSU` `v3.2.5` / `v3.3.0` → uapi **2**（`KERNEL_SU_UAPI_VERSION = 2`）
-- `Baka-SU/BakaSU` `v4.2.0-rc3` → uapi **4**（管理器和内核要成对换）
+### 四条硬规则
+
+1. **跟 tag，不跟 main。** main 随时改 uapi（BakaSU 就是 `rc3`=4 → `main`=5）。
+   要升版本就先把新 tag 的 `uapi/supercall.h` 里的 `KERNEL_SU_UAPI_VERSION` 抄进上表再编。
+2. **ko 文件名固定，版本写在 modinfo/vermagic 里。** 升级 = 同名文件替换 + 重算 MANIFEST，
+   loader 和 App 的映射表不用动。
+3. **fork 用 `ksu_tarball`，别用它的 `setup.sh`。** FinaSU 的 setup.sh 里 `git clone` 写死成
+   `tiann/KernelSU`，用它等于拿着别人的源码编自己的 ko。workflow 里填 tarball 地址即走
+   「解包 → 手动软链 → Makefile/Kconfig 三件套」。
+4. **没在真机跑过的，进 docs 时标「待验收」。**
+
+### APK 侧联动（m6-shell）
+
+- 载荷一变就 **必须 +versionCode**：`PAYLOAD_STAMP = vc<versionCode>-<MANIFEST md5>`，
+  vc 不变时设备端戳可能仍然相等 ⇒ 跳过推送 ⇒ 你装的是新 App、跑的是旧载荷。
+- 同步载荷：`python m6-jailbreak-core/tools/rebuild_manifest.py --sync`
+  （重算 `MANIFEST.md5` + `bundled_ko.md5`，并把 payload 全量拷进 `app/src/main/assets/route/m6/`）
+- 产物命名：`dist/m6-shell-<versionName>-{debug,release}.apk`；release 用 `keystore/m6shell-release.jks`。
 
 ## 坑
 
