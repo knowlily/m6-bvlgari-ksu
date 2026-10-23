@@ -406,7 +406,7 @@ static char __user *ksu_su_push_path(const char *s, unsigned long usp)
         return NULL;
     p = (char __user *)((usp - len) & ~0xFUL);
     if (copy_to_user_nofault(p, s, len)) {
-        pr_alert("ksu: su-push fail len=%zu usp=%lx\n", len, usp);
+        pr_alert("ksu: su-push fail len=%zu usp=%lx", len, usp);
         return NULL;
     }
     return p;
