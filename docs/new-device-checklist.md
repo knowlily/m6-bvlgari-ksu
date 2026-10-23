@@ -90,6 +90,9 @@ marker（`/data/local/tmp/route/m6/`，越狱时读）：
 
 ## 六、已知限制
 
+0. **su 落点是 `/dev/su`**（tmpfs + `u:object_r:ksu_file:s0`）。软重启不清、装新 APK 也不影响；
+   完整重启后 `/dev` 是新的，需要重新越狱一次（loader 会重建）。不要把它改成 `/data/app`
+   或 `/data/local/tmp` 下的路径 —— 前者会被 PackageManager 清，后者 App 域不能执行。
 1. 提权成功后按钮变灰，**不能二次提权**；换 ko 必须重启重来越狱。
 2. `ksud unload` 必 panic，不能靠卸载改参数。
 3. 重启后模块消失，需要重新点一次提权。
