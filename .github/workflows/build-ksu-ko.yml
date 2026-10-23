@@ -27,6 +27,14 @@ on:
         description: "厂商源码 zip 的下载地址（留空用仓库变量 HONOR_SRC_URL）"
         default: ""
         required: false
+      ksu_tarball:
+        description: "KSUSU 源码 tarball 地址（填了就绕过 setup.sh，直接解包到 KernelSU/）"
+        default: ""
+        required: false
+      ko_alias:
+        description: "产物 ko 的别名前缀（如 sukisu / finasu），留空则用原文件名"
+        default: ""
+        required: false
 
 jobs:
   build:
@@ -94,10 +102,27 @@ jobs:
         env:
           REF: ${{ inputs.ksu_ref }}
           KREPO: ${{ inputs.ksu_repo }}
+          TARBALL: ${{ inputs.ksu_tarball }}
         run: |
           cd work/Code_Opensource/kernel
-          curl -LSs "https://raw.githubusercontent.com/${KREPO}/${REF}/kernel/setup.sh" -o /tmp/ksu_setup.sh
-          bash /tmp/ksu_setup.sh "$REF"
+          if [ -n "$TARBALL" ]; then
+            # 有些 fork 的 setup.sh 里 git clone 地址写死成上游仓库（FinaSU 就克隆了 tiann/KernelSU），
+            # 用它等于编错源码 ⇒ 直接下 tarball 自己集成。
+            echo "[fork] 直接下 tarball：$TARBALL"
+            rm -rf KernelSU && mkdir -p KernelSU
+            curl -L --retry 3 --max-time 600 -o /tmp/ksu_src.tgz "$TARBALL"
+            tar xzf /tmp/ksu_src.tgz -C KernelSU --strip-components=1
+            ls KernelSU | head
+            grep -m1 KERNEL_SU_UAPI_VERSION KernelSU/uapi/supercall.h || true
+            # 手动做 setup.sh 的那三件事
+            ln -sfn ../KernelSU/kernel drivers/kernelsu
+            grep -q "kernelsu" drivers/Makefile || printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> drivers/Makefile
+            grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig || sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+            tail -3 drivers/Makefile; grep -n kernelsu drivers/Kconfig | head -3
+          else
+            curl -LSs "https://raw.githubusercontent.com/${KREPO}/${REF}/kernel/setup.sh" -o /tmp/ksu_setup.sh
+            bash /tmp/ksu_setup.sh "$REF"
+          fi
           KD=$(ls -d KernelSU KernelSU-Next 2>/dev/null | head -1)
           echo "KSU 源码目录: ${KD:-（没找到）}"
           [ -n "$KD" ] || { echo "!! setup.sh 没有产出源码目录"; exit 1; }
@@ -196,7 +221,10 @@ jobs:
         run: |
           mkdir -p artifacts
           grep -E "^CONFIG_(KSU|KSU_DEBUG)" work/Code_Opensource/kernel/out/.config || echo "!! CONFIG_KSU 没进 .config"
-          find work/Code_Opensource/kernel -name "kernelsu*.ko" -exec cp -v {} artifacts/ \;
+          ALIAS="${{ inputs.ko_alias }}"
+          for f in $(find work/Code_Opensource/kernel -name "kernelsu*.ko"); do
+            if [ -n "$ALIAS" ]; then cp -v "$f" "artifacts/kernelsu_${ALIAS}.ko"; else cp -v "$f" artifacts/; fi
+          done
           ls -l artifacts/
           for f in artifacts/*.ko; do
             echo "=== $f"
@@ -222,5 +250,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ksu-ko-${{ inputs.ksu_repo == 'tiann/KernelSU' && 'upstream' || 'bakasu' }}-${{ inputs.ksu_ref }}
+          name: ksu-ko-${{ inputs.ko_alias != '' && inputs.ko_alias || (inputs.ksu_repo == 'tiann/KernelSU' && 'upstream' || 'bakasu') }}-${{ inputs.ksu_ref }}
           path: artifacts/
