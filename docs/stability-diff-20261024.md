@@ -123,3 +123,54 @@ m6-shell-2.10-release.apk   23,029,329 B   md5 5463bc9d19e826fe20adc216772a3e93 
 **2.10 尚未真机验证**：装机后看两件事 ——
 ① 提权流程是否照常（"已观察 Ns" 心跳变成 30s 一次属正常）；
 ② 长时间使用是否还发烫/卡顿。
+
+---
+
+## 七、追加：关屏 panic（2026-10-24 真机反馈）
+
+### 现象对比
+
+| 组合 | 表现 |
+|---|---|
+| 老壳 3.16.34 + uapi≤5 的 ko（就连载荷缺文件、借手机上旧文件跑） | **从不 panic** |
+| 新壳 2.8 + FinaSU **v1.0.9**（uapi6） | root 正常、su 正常，但**关屏就 panic** |
+
+### 推断
+
+两份 ko 的二进制差异只有 v1.0.9 的 `mount_view_filter`：
+
+```
+kernelsu_finasu.ko  v1.0.8  7,359,024 B  9590c0b0a9c6bbba758a91c69c130f45   mount_view_filter 字符串：0 处
+kernelsu_finasu.ko  v1.0.9  7,489,752 B  d65e52048d1ec5dcc9e89c65d30e64a5   mount_view_filter 字符串：13 处
+```
+
+`mount_view_filter` hook 的是 `seq_show` / `open` —— **挂载视图/路径解析的全局热路径**。
+关屏会触发电源态切换、挂载表刷新、进程冻结/解冻，这些都会走到它。
+结构偏移与荣耀 6.1.157 不符时，就不是"某个功能不可用"，而是直接把内核带下去。
+
+老壳那批 ko（`os9-selx11` / `custom` / `ksu331` / `next`）**都没有这个功能**，所以从来没 panic——
+这也解释了"虽然缺文件却更稳"的观感差异。
+
+### 2.11 的处理
+
+| 项 | 内容 |
+|---|---|
+| 默认 ko | **FinaSU v1.0.8**（无 `mount_view_filter`），仍配 v1.0.9 管理器（uapi 都是 6） |
+| v1.0.9 保留为可选 | `touch $RD/USE_FINASU_109` 才用 |
+| SukiSU 备选 | `touch $RD/PREFER_STABLE_KO`（需管理器切到 SukiSU） |
+| 载荷 | 24 文件（同时带 1.0.8 与 1.0.9 两份 finasu ko） |
+
+产物：`m6-shell-2.11-release.apk` 25,044,240 B `1b713b625ad43977ef48b3ee78141cf1`（vc21）
+
+### 验证方法
+
+1. 装 2.11 → 重启 → 提权（日志应出现 `[稳定性] 默认 FinaSU v1.0.8（无 mount_view_filter）`）
+2. 关屏放置 5~10 分钟，反复三次
+3. 若仍 panic，抓证据：
+   ```bash
+   adb shell ls -l /sys/fs/pstore/            # console-ramoops-0 就是上次崩溃的内核日志
+   adb shell cat /sys/fs/pstore/console-ramoops-0 | tail -60
+   adb shell cat /proc/last_kmsg 2>/dev/null | tail -60
+   ```
+   `pc :` 落在 `kernelsu+0x…` 区间 ⇒ 就是 ko；落在 `msm_…/cpuidle/suspend` ⇒ 电源态问题。
+4. 如果 v1.0.8 也 panic，下一步换 `PREFER_STABLE_KO`（SukiSU）或整条退回 uapi5（BakaSU）。
