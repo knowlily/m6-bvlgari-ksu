@@ -3,7 +3,7 @@
 荣耀 Magic6 Pro（`BVL-AN16`）**厂商开源内核树**上编 KernelSU 系 ko，GitHub Actions 出包。
 
 **现状（2026-10-24 真机验证）**：模块 Live、管理器授权正常、授权过的 App 里
-`su -c id` = `uid=0(root) … context=u:r:ksu:s0`。uapi6 线 **FinaSU v1.0.9** 与 **SukiSU v4.2.1-r1** 都已通过。
+`su -c id` = `uid=0(root) … context=u:r:ksu:s0`。uapi6 线 **FinaSU（v1.0.8/v1.0.10）** 与 **SukiSU v4.2.1-r1** 都已通过。
 细节见 [`docs/status_20261024.md`](docs/status_20261024.md)。
 
 ## ko 清单
@@ -13,7 +13,8 @@
 | `kernelsu_custom.ko` | BakaSU `main` | 5 | `com.bakasu.bakasu` | ✅ 历史验证（最稳） |
 | `kernelsu_ksu331.ko` | KernelSU `v3.3.1` | 5 | `me.weishu.kernelsu` | ✅ 验证 |
 | `kernelsu_next.ko` | KernelSU-Next `v3.4.2` | 5 | `kqvdie.zeykvw.hpbcyd` | ✅ 验证 |
-| `kernelsu_finasu.ko` | FinaSU `v1.0.9` | 6 | `me.yuki.fina` | ✅ 验证 |
+| `kernelsu_finasu110.ko` | FinaSU `v1.0.10` | 6 | `me.yuki.fina` | 待真机（默认） |
+| `kernelsu_finasu.ko` | FinaSU `v1.0.8` | 6 | `me.yuki.fina` | ✅ 验证（无 mount_view_filter，最保守） |
 | `kernelsu_sukisu.ko` | SukiSU `v4.2.1-r1` | 6 | `com.sukisu.ultra` | ✅ 验证 |
 | `kernelsu-os9-selx11.ko` | 旧作者线 | 4 | ReSukiSU / BakaSU 旧版 | 兜底 |
 | `kernelsu_success.ko` | KernelSU 3.2.5（6.1.128） | 2 | — | A/B 对照 |
