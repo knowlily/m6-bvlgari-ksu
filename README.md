@@ -73,6 +73,7 @@ gh workflow run build-ksu-ko.yml -f ksu_repo=LyraVoid/FinaSU -f ksu_ref=v1.0.9 \
 
 | 文件 | 内容 |
 |---|---|
+| `docs/stability-diff-20261024.md` | 2.8 不稳 vs 老壳 3.16.34 差异清单 + 2.10 优化 |
 | `docs/su-完整技术报告.md` | **完整技术报告**（给外部读者）：原理/步骤/失败模式/实测数据/换机型清单 |
 | `docs/su-问题解决记录.md` | **复盘**：机型、四个排查阶段、误判在哪、最终方案+三条教训 |
 | `docs/su-playbook.md` | **su 打通步骤**（四条件 + 6 步 + 排错表） |
