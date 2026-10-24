@@ -73,6 +73,7 @@ gh workflow run build-ksu-ko.yml -f ksu_repo=LyraVoid/FinaSU -f ksu_ref=v1.0.9 \
 
 | 文件 | 内容 |
 |---|---|
+| `docs/su-playbook.md` | **su 打通步骤**（四条件 + 6 步 + 排错表） |
 | `docs/status_20261024.md` | 现状快照：版本/ko/已验证项/剩余项 |
 | `docs/progress_20261024.md` | 当天全过程 + 结论修正 |
 | `docs/progress_20261022.md` / `20261021.md` | 早期链路：双 kprobe sucompat、MTE 去标签 |
