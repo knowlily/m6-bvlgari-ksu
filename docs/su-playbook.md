@@ -3,6 +3,23 @@
 > 目标：让授权过的 App 里 `su -c id` 输出 `uid=0(root) … context=u:r:ksu:s0`。
 > 这份文档只写「怎么做 + 怎么判断成没成」，原理推导见 `status_20261024.md`。
 
+## 适用机型
+
+本文所有实测数据来自这台机器（每一步结论都只对它成立）：
+
+| 项 | 值 |
+|---|---|
+| 型号 | 荣耀 Magic6 Pro，`BVL-AN16` |
+| 设备代号 | `HNBVL`（`ro.product.device`） |
+| 系统 | MagicOS 10.0.0.170（`BVL-AN16 10.0.0.170(C00E170R202P8)`），Android 16 |
+| 内核 | `6.1.157-android14-11-g7d3922fade43` |
+| fingerprint | `HONOR/BVL-AN16/HNBVL:16/HONORBVL-AN16/10DLDLD170C00E170:user/release-keys` |
+| 序列号（测试机） | `ACPR024524000114` |
+
+**判定别的机器能不能直接照抄只看两个值**：`uname -r` 与 `ro.build.fingerprint`，逐字一致才行。
+不一致就要重采 kallsyms、重编 ko、重采 `device_crc.json`，步骤见
+`new-device-checklist.md`；本文的「四条件」和补丁思路仍然适用。
+
 ## 一句话结论
 
 **su 可用 = 四条腿同时站住**，缺一条就失败，且失败现象长得几乎一样（都是 `su: inaccessible or not found`
