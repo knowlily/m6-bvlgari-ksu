@@ -14,11 +14,13 @@
 
 ## 二、装哪个管理器 → 自动配哪份 ko
 
-| 管理器包名 | 用哪份 ko |
-|---|---|
-| `me.weishu.kernelsu`（官方内核版 Manager） | `kernelsu_ksu331.ko`（tiann v3.3.1） |
-| `kqvdie.zeykvw.hpbcyd`（Next 伪装包名） | `kernelsu_next.ko`（Next v3.4.2） |
-| `com.bakasu.bakasu` / `com.resukisu.*` / 没装 | `kernelsu_custom.ko`（BakaSU main） |
+| 管理器包名 | 用哪份 ko | uapi |
+|---|---|---|
+| `me.weishu.kernelsu`（官方内核版 Manager） | `kernelsu_ksu331.ko`（tiann v3.3.1） | 5 |
+| `kqvdie.zeykvw.hpbcyd`（Next 伪装包名） | `kernelsu_next.ko`（Next v3.4.2） | 5 |
+| `com.bakasu.bakasu` / `com.resukisu.*` / 没装 | `kernelsu_custom.ko`（BakaSU main） | 5 |
+| `com.sukisu.ultra`（SukiSU v4.2.1-r1） | `kernelsu_sukisu.ko` | **6** |
+| `me.yuki.fina`（FinaSU v1.0.9） | `kernelsu_finasu.ko` | **6** |
 
 识别顺序：`MANAGER_PKG` marker → App 私有文件 `files/manager_pkg` → **`pm list packages` 自动识别**（2026-10-23 新增）。
 都没有时退回 `kernelsu_custom.ko`，并在日志里写明。
@@ -87,6 +89,17 @@ marker（`/data/local/tmp/route/m6/`，越狱时读）：
 | （都不建） | `su_cred=2`，换域 —— **现默认** |
 | `SU_CHECK_DBG=<uid>` | 打开调试并盯这个 uid |
 | `ALLOW_FOREIGN_KO` | 允许用用户自己丢进来的 ko（不校验 md5） |
+| `DYNAMIC_MGR` | 动态管理器：不收紧 `mgr_pkgs`、跳过手工加冕、`mgr_dont_invalidate=0` |
+| `SHOW_DYNAMIC_MGR` | 只是把 App 里「动态管理器」那一行显示出来（2.2 起默认隐藏，关于页连点版本号 5 次也会写） |
+
+## 五之二、App 侧隐藏项（2.2 起）
+
+「动态管理器」开关默认不显示。要放出来两种办法：
+
+1. 关于页 → **连点版本号 5 次**（2 秒内，第 3 次起会提示还差几次）
+2. 设备上 `touch /data/local/tmp/route/m6/SHOW_DYNAMIC_MGR`，重开 App
+
+已经开着（`DYNAMIC_MGR` 存在）时**始终显示**，不然关不掉。
 
 ## 六、已知限制
 
@@ -97,6 +110,9 @@ marker（`/data/local/tmp/route/m6/`，越狱时读）：
 2. `ksud unload` 必 panic，不能靠卸载改参数。
 3. 重启后模块消失，需要重新点一次提权。
 4. `su` 的落点是 App 自己的 lib 目录（`/data/app/.../lib/arm64/libksu_su.so`），反 root 检测能看到这个痕迹。
+5. **整套载荷绑死这个内核镜像**：ko vermagic 逐字匹配、`next_sym_addr*.txt` 是静态地址、
+   `cve-…-dc14` 里带 `6.1.157-honor-magic6pro-app` 的调优 profile。
+   换固件（哪怕同型号）就要重采符号表 + 重编 ko + 重调 exploit。
 
 ## 七、出问题的排查起点
 
