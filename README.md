@@ -73,6 +73,16 @@ MagicOS10.0-ROM-Bvlgari_MagicOS10.0_Code_Opensource
   （重算 `MANIFEST.md5` + `bundled_ko.md5`，并把 payload 全量拷进 `app/src/main/assets/route/m6/`）
 - 产物命名：`dist/m6-shell-<versionName>-{debug,release}.apk`；release 用 `keystore/m6shell-release.jks`。
 
+
+## 文档索引
+
+| 文件 | 内容 |
+|---|---|
+| `docs/status_20261024.md` | **现状快照（先看这个）**：版本/ko 清单/已验证项/未解决项/下一步三条路 |
+| `docs/progress_20261024.md` | 10-24 当天全过程：uapi6 适配、FinaSU v1.0.9、BakaSU 动态管理器、符号清单、su 落点两修、错误普查 |
+| `docs/progress_20261022.md` / `20261021.md` | 早期链路：双 kprobe sucompat、MTE 去标签、载荷与 selfcheck 体例 |
+| `docs/new-device-checklist.md` | 另一台同型号同固件机器的直用清单 |
+
 ## 坑
 
 `make ... | tail -60` 会让 tail 提前关管道、make 收到 SIGPIPE 死掉，而管道退出码是 tail 的 0 ⇒ 步骤显示成功但没有任何产物。必须 `set -o pipefail` 或重定向到 build.log。
