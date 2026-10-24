@@ -2,10 +2,11 @@
 
 荣耀 Magic6 Pro（`BVL-AN16`，Bvlgari）**厂商开源内核树**上编 KernelSU 系 ko，并用 GitHub Actions 出包。
 
-> **当前状态（2026-10-24）**
-> 内核侧已通：模块能稳稳装进内核（`kernelsu … Live`、`modules=1 root=1 physrw=1`、SELinux 回到 Enforcing）。
-> **su 还不通**：`sucompat` 没有把 `/system/bin/su` 重定向到 `su_path`，uapi6 线（FinaSU / SukiSU）
-> 疑似与厂商内核结构不兼容。快照见 [`docs/status_20261024.md`](docs/status_20261024.md)。
+> **当前状态（2026-10-24 收工）**
+> **全链路已通**：模块 Live（`kernelsu … Live`、`modules=1 root=1 physrw=1`、SELinux Enforcing），
+> 管理器授权 App 正常，**授权过的 App 里 `su -c id` = `uid=0(root) … context=u:r:ksu:s0`**。
+> 唯一限制：`adb shell`（uid 2000）不在 allowlist ⇒ 那里敲 `su` 仍 ENOENT，这是授权模型，不是 bug。
+> 快照见 [`docs/status_20261024.md`](docs/status_20261024.md)。
 
 ## 为什么用厂商树
 
@@ -58,7 +59,7 @@ gh workflow run build-ksu-ko.yml -f ksu_repo=LyraVoid/FinaSU -f ksu_ref=v1.0.9 \
 | `kernelsu_next.ko` | 6.4 MB | `KernelSU-Next` `v3.4.2` | 5 | `kqvdie.zeykvw.hpbcyd`（伪装名） | 维护 |
 | `kernelsu_custom.ko` | 10.3 MB | `Baka-SU/BakaSU` `main` | 5 | `com.bakasu.bakasu` | 维护（历史真机最稳） |
 | `kernelsu_sukisu.ko` | 7,465,008 B | `SukiSU-Ultra` `v4.2.1-r1` | **6** | `com.sukisu.ultra` | 待真机验收 |
-| `kernelsu_finasu.ko` | 7,489,752 B | `LyraVoid/FinaSU` `v1.0.9` | **6** | `me.yuki.fina` | 模块 Live，**sucompat 不通** |
+| `kernelsu_finasu.ko` | 7,489,752 B | `LyraVoid/FinaSU` `v1.0.9` | **6** | `me.yuki.fina` | ✅ 真机通过（Live + su 可用） |
 | `kernelsu-os9-selx11.ko` | 5.5 MB | 旧作者线（BakaSU 4.1.0 代） | 4 | ReSukiSU / BakaSU 旧版 | 兜底，不再升级 |
 | `kernelsu_success.ko` | 5.5 MB | KernelSU 3.2.5 快照（6.1.128） | 2 | — | 仅 A/B 对照 |
 
@@ -149,8 +150,10 @@ App 用 `applicationInfo.nativeLibraryDir` 把路径写给 loader（`$RD/SELF_LI
 
 ## 已知问题
 
-1. **uapi6 线 sucompat 不生效** —— 已排除目标二进制、执行权限、内核符号、kprobe 编译、`grant_apps`；
-   剩下最合理的解释就是钩子在这个厂商内核上没工作。三条出路见 `docs/status_20261024.md` §5。
+1. **`adb shell`（uid 2000）里 `su` 不生效** —— 不是 bug，是授权模型：shell 不进 allowlist 就不重定向
+   （`allow_shell=1` 只是 insmod 参数，不等于把 2000 写进持久 allowlist）。**测 su 必须用 App 域**
+   （aShell 之类，先在管理器里授权），用 adb shell 测会得到假阴性——这条踩过，2026-10-24 一度误判成
+   "sucompat 不兼容"。
 2. **`resize_pipe_slots soft-fail`** —— 管道页配额不足，降 exploit 命中率；重启最有效。
 3. **`ksud unload` 必 panic** —— 不能靠卸载换 ko，只能重启；一轮 boot 只有一发。
 
