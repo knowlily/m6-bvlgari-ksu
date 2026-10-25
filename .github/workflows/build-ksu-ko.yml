@@ -112,6 +112,18 @@ jobs:
             rm -rf KernelSU && mkdir -p KernelSU
             curl -L --retry 3 --max-time 600 -o /tmp/ksu_src.tgz "$TARBALL"
             tar xzf /tmp/ksu_src.tgz -C KernelSU --strip-components=1
+            # ★ BakaSU 的 kernel/Kbuild 里有硬门禁：
+            #     LOCAL_GIT_EXISTS := test -e $(KSU_SRC)/../.git
+            #   不满足直接 $(error "use BakaSU as a git submodule")，编译必挂。
+            #   tarball 解出来没有 .git ⇒ 就地 init 一个（KSU_VERSION 还要 rev-list --count HEAD，
+            #   所以必须至少有一次提交；KSU_TAG_NAME 走 describe --tags，所以打个 tag）。
+            ( cd KernelSU \
+              && git init -q . \
+              && git add -A >/dev/null 2>&1 \
+              && git -c user.email=ci@localhost -c user.name=ci commit -qm "ci: tarball snapshot" \
+              && git tag -f v4.2.0 >/dev/null 2>&1 \
+              && echo "[fork] 已在 KernelSU/ 初始化 git（$(git rev-list --count HEAD) commit）" ) \
+              || echo "[fork] !! KernelSU/ git init 失败（BakaSU 可能在 Kbuild 处报错）"
             ls KernelSU | head
             grep -m1 KERNEL_SU_UAPI_VERSION KernelSU/uapi/supercall.h || true
             # 手动做 setup.sh 的那三件事
