@@ -6,6 +6,10 @@
 `su -c id` = `uid=0(root) … context=u:r:ksu:s0`。uapi6 线 **FinaSU（v1.0.8/v1.0.10）** 与 **SukiSU v4.2.1-r1** 都已通过。
 细节见 [`docs/status_20261024.md`](docs/status_20261024.md)。
 
+**2026-10-25 变更**：`su` 其实由 `su_path` 注入成真实文件 `/system/bin/su`（Honor 的 `/system/bin` overlay），
+与内核 sucompat 无关；sucompat 在本机会把 execve 打成 SIGSEGV，**2.25 起默认关闭**
+（`force_feature=su_compat:0`，要恢复 `touch $RD/WANT_SUCOMPAT`）。见 [`docs/status_20261025.md`](docs/status_20261025.md)。
+
 ## ko 清单
 
 | ko | 源码 / tag | uapi | 管理器 | 状态 |
@@ -82,3 +86,7 @@ gh workflow run build-ksu-ko.yml -f ksu_repo=LyraVoid/FinaSU -f ksu_ref=v1.0.9 \
 | `docs/progress_20261024.md` | 当天全过程 + 结论修正 |
 | `docs/progress_20261022.md` / `20261021.md` | 早期链路：双 kprobe sucompat、MTE 去标签 |
 | `docs/new-device-checklist.md` | 同型号同固件机器的直用清单 |
+
+## 文档
+
+- [2026-10-25 panic 排查 / sucompat 默认关闭](docs/status_20261025.md)
