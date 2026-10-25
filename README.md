@@ -20,8 +20,15 @@
 | `kernelsu_finasu110.ko` | FinaSU `v1.0.10` | 6 | `me.yuki.fina` | 待真机（默认） |
 | `kernelsu_finasu.ko` | FinaSU `v1.0.8` | 6 | `me.yuki.fina` | ✅ 验证（无 mount_view_filter，最保守） |
 | `kernelsu_sukisu.ko` | SukiSU `v4.2.1-r1` | 6 | `com.sukisu.ultra` | ✅ 验证 |
+| `kernelsu_suki421.ko` | SukiSU `v4.2.1-r2` | 6 | `com.sukisu.ultra` | 待真机（2.31 新加） |
+| `kernelsu_basu420.ko` | BakaSU `main@d5e9e025`（= APK 35252） | 6 | `com.resukisu.resukisu` | 待真机（2.31 新加） |
 | `kernelsu-os9-selx11.ko` | 旧作者线 | 4 | ReSukiSU / BakaSU 旧版 | 兜底 |
 | `kernelsu_success.ko` | KernelSU 3.2.5（6.1.128） | 2 | — | A/B 对照 |
+
+> **怎么选 ko**：不要按包名，按管理器里 ksud 的**版本串**。SukiSU 的发行版会随机改包名（实测 `rqglxo.qzizju.uholjr`）也会把 ksud 改名成 `libeexgslcpwg.so`，包名白名单追不上。
+> loader 现在做的是：抽 ksud → 读版本串 → `4.2.0-rc3-81-gd5e9e025`(BakaSU main) 配 `kernelsu_basu420.ko`；`4.2.1-r2`(SukiSU) 配 `kernelsu_suki421.ko`；`1.0.x`(FinaSU) 配 `kernelsu_finasu110.ko`。
+>
+> ⚠ **BakaSU 的 uapi 分两条线**：tag `v4.2.0-rc3` 是 **uapi4**，而 tag 之后 81 个提交的 `main`（`d5e9e025`，也就是 35252 那个 APK）是 **uapi6**。管理器界面显示 6 就对，用 main 编的 ko。
 
 ## 为什么用厂商树
 
