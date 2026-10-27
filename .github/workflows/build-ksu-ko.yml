@@ -15,14 +15,18 @@ on:
         description: "打开 CONFIG_KSU_DEBUG（ksud debug set-manager 可用 + 保留 kobject）"
         type: boolean
         default: true
+      target:
+        description: "内核档位（见 config/targets.json）：m6=MagicOS10/170-175，os11=MagicOS11/0.0.110"
+        default: "m6"
+        required: true
       sublevel:
-        description: "内核 SUBLEVEL（设备是 157）"
-        default: "157"
-        required: true
+        description: "可选覆盖：内核 SUBLEVEL（留空 = 用 targets.json，别再手填）"
+        default: ""
+        required: false
       localversion:
-        description: "LOCALVERSION（要和 uname -r 的后缀一致）"
-        default: "-android14-11-g7d3922fade43"
-        required: true
+        description: "可选覆盖：LOCALVERSION（留空 = 用 targets.json）"
+        default: ""
+        required: false
       source_url:
         description: "厂商源码 zip 的下载地址（留空用仓库变量 HONOR_SRC_URL）"
         default: ""
@@ -42,6 +46,16 @@ jobs:
     timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
+
+      # ── 档位解析（唯一真源 = config/targets.json）─────────────────────────
+      # 以后加固件只改 targets.json，不用再记 sublevel/localversion/config 三件套。
+      - name: 解析目标档位
+        run: |
+          python3 tools/target.py resolve --target "${{ inputs.target }}" \
+            --sublevel "${{ inputs.sublevel }}" \
+            --localversion "${{ inputs.localversion }}" >> "$GITHUB_ENV"
+          echo "---- 本次目标 ----"
+          grep -E "^(TARGET|KERNEL_RELEASE|LOCALVERSION|SUBLEVEL|CONFIG_PATH)=" "$GITHUB_ENV"
 
       - name: 依赖
         run: |
@@ -67,14 +81,26 @@ jobs:
         uses: actions/cache@v4
         with:
           path: src.zip
-          key: honor-bvlgari-src-v1
+          key: honor-src-${{ inputs.target }}-v1
 
       - name: 下载厂商源码
         env:
-          SRC_URL: ${{ inputs.source_url != '' && inputs.source_url || vars.HONOR_SRC_URL }}
+          SRC_URL_M6: ${{ vars.HONOR_SRC_URL }}
+          # os11 的源码地址单独一个仓库变量：两个固件的内核树不是同一份 zip
+          SRC_URL_OS11: ${{ vars.HONOR_SRC_URL_OS11 }}
         run: |
           if [ -s src.zip ]; then echo "已缓存"; ls -lh src.zip; exit 0; fi
-          if [ -z "$SRC_URL" ]; then echo "!! 没有源码地址"; exit 1; fi
+          if [ -n "${{ inputs.source_url }}" ]; then
+            SRC_URL="${{ inputs.source_url }}"
+          elif [ "$SOURCE_VAR" = "HONOR_SRC_URL_OS11" ]; then
+            SRC_URL="$SRC_URL_OS11"
+          else
+            SRC_URL="$SRC_URL_M6"
+          fi
+          if [ -z "${SRC_URL:-}" ]; then
+            echo "!! 没有源码地址：请在仓库 Settings → Variables 里配 $SOURCE_VAR"
+            exit 1
+          fi
           curl -L --retry 3 --max-time 3000 \
             -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36" \
             -H "Referer: https://www.honor.com/global/opensource/detail.html" \
@@ -92,7 +118,7 @@ jobs:
       - name: 对齐版本号（vermagic）
         run: |
           cd work/Code_Opensource/kernel
-          sed -i "s/^SUBLEVEL = .*/SUBLEVEL = ${{ inputs.sublevel }}/" Makefile
+          sed -i "s/^SUBLEVEL = .*/SUBLEVEL = $SUBLEVEL/" Makefile
           # 树不是 git 仓库 ⇒ setlocalversion 会追加 '+'，导致 vermagic 与 uname -r 差一个字符
           # 而内核拒载。touch 一个空 .scmversion 即可让 setlocalversion 直接返回空。
           touch .scmversion
@@ -164,13 +190,13 @@ jobs:
         run: |
           cd work/Code_Opensource/kernel
           mkdir -p out
-          if [ -f "$GITHUB_WORKSPACE/config/device.config" ]; then
-            echo "使用设备 config"
-            cp "$GITHUB_WORKSPACE/config/device.config" out/.config
-            echo "${{ inputs.localversion }}" > /tmp/lv
+          if [ -f "$GITHUB_WORKSPACE/$CONFIG_PATH" ]; then
+            echo "使用档位 config: $CONFIG_PATH"
+            cp "$GITHUB_WORKSPACE/$CONFIG_PATH" out/.config
+            echo "$LOCALVERSION" > /tmp/lv
           else
-            echo "!! 没有 config/device.config ⇒ 用 gki_defconfig（CRC 可能对不上）"
-            scripts/config --file arch/arm64/configs/gki_defconfig --set-str LOCALVERSION "${{ inputs.localversion }}" || true
+            echo "!! 没有 $CONFIG_PATH ⇒ 用 gki_defconfig（CRC 可能对不上）"
+            scripts/config --file arch/arm64/configs/gki_defconfig --set-str LOCALVERSION "$LOCALVERSION" || true
             make -s O=out ARCH=arm64 LLVM=1 gki_defconfig
           fi
           # 保证 MODVERSIONS / 模块支持
@@ -193,7 +219,7 @@ jobs:
             echo "厂商树缺 fs/f2fs/hyper_prealloc.c ⇒ 关掉 CONFIG_F2FS_HYPER_PREALLOC"
             ./scripts/config --file out/.config -d F2FS_HYPER_PREALLOC || true
           fi
-          ./scripts/config --file out/.config --set-str LOCALVERSION "${{ inputs.localversion }}" || true
+          ./scripts/config --file out/.config --set-str LOCALVERSION "$LOCALVERSION" || true
           make -s O=out ARCH=arm64 LLVM=1 olddefconfig
           grep -E "CONFIG_(MODVERSIONS|MODULE_UNLOAD|LOCALVERSION|SMP|PREEMPT)" out/.config | head
 
@@ -235,8 +261,19 @@ jobs:
           grep -E "^CONFIG_(KSU|KSU_DEBUG)" work/Code_Opensource/kernel/out/.config || echo "!! CONFIG_KSU 没进 .config"
           ALIAS="${{ inputs.ko_alias }}"
           for f in $(find work/Code_Opensource/kernel -name "kernelsu*.ko"); do
-            if [ -n "$ALIAS" ]; then cp -v "$f" "artifacts/kernelsu_${ALIAS}.ko"; else cp -v "$f" artifacts/; fi
+            if [ -n "$ALIAS" ]; then
+              cp -v "$f" "artifacts/kernelsu_${ALIAS}${ARTIFACT_SUFFIX}.ko"
+            else
+              _b=$(basename "$f" .ko)
+              cp -v "$f" "artifacts/${_b}${ARTIFACT_SUFFIX}.ko"
+            fi
           done
+          # 自校验：vermagic 必须与档位一致，否则这份产物根本装不上（内核逐字比对）
+          for f in artifacts/*.ko; do
+            python3 tools/target.py vermagic --target "$TARGET" --ko "$f" || {
+              echo "!! vermagic 不符，产物作废"; exit 1; }
+          done
+          ( cd artifacts && md5sum *.ko > md5sums.txt && cat md5sums.txt )
           ls -l artifacts/
           for f in artifacts/*.ko; do
             echo "=== $f"
@@ -249,7 +286,7 @@ jobs:
         run: |
           for f in artifacts/*.ko; do
             echo "=== $f"
-            python3 scripts/check_crc.py "$f" config/device_crc.json || echo "!! 有 CRC 不一致，见上"
+            python3 scripts/check_crc.py "$f" "$CRC_PATH" || echo "!! 有 CRC 不一致，见上"
           done
 
       - name: 上传 build.log（总是）
@@ -262,5 +299,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ksu-ko-${{ inputs.ko_alias != '' && inputs.ko_alias || (inputs.ksu_repo == 'tiann/KernelSU' && 'upstream' || 'bakasu') }}-${{ inputs.ksu_ref }}
+          name: ksu-ko-${{ inputs.ko_alias != '' && inputs.ko_alias || (inputs.ksu_repo == 'tiann/KernelSU' && 'upstream' || 'bakasu') }}${{ env.ARTIFACT_SUFFIX }}-${{ inputs.ksu_ref }}
           path: artifacts/

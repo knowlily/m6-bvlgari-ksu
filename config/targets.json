@@ -1,0 +1,30 @@
+{
+  "_comment": "内核档位表 —— 一份 ko 只对一个 build 有效（vermagic 逐字比对 + __versions CRC）。新增固件在这里加一项，不要改 workflow。",
+  "m6": {
+    "label": "MagicOS 10 / 170-175",
+    "kernel_build": "g7d3922fade43",
+    "kernel_release": "6.1.157-android14-11-g7d3922fade43",
+    "sublevel": "157",
+    "localversion": "-android14-11-g7d3922fade43",
+    "config": "config/device.config",
+    "crc": "config/device_crc.json",
+    "source_var": "HONOR_SRC_URL",
+    "source_hint": "荣耀开源中心 → Bvlgari_MagicOS10.0_Code_Opensource",
+    "artifact_suffix": "",
+    "payload_dir": "payload"
+  },
+  "os11": {
+    "label": "MagicOS 11 / 0.0.110",
+    "kernel_build": "g84ffa64b710b",
+    "kernel_release": "6.1.157-android14-11-g84ffa64b710b",
+    "sublevel": "157",
+    "localversion": "-android14-11-g84ffa64b710b",
+    "config": "config/device-os11.config",
+    "config_fallback": "config/device.config",
+    "crc": "config/device_crc.json",
+    "source_var": "HONOR_SRC_URL_OS11",
+    "source_hint": "荣耀开源中心 → MagicOS11.0.0.110 对应 Bvlgari 源码包（版本号必须与设备 uname -r 对得上）",
+    "artifact_suffix": "_os11",
+    "payload_dir": "payload/os11"
+  }
+}

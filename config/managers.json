@@ -1,0 +1,75 @@
+{
+  "_comment": "管理器 ↔ ko 对照表。一份 ko 只配一个管理器的 uapi，别混用。tarball=true 表示必须用 ksu_tarball 绕开上游 setup.sh（fork 的 setup.sh 常写死 tiann/KernelSU）。",
+  "ksu331": {
+    "repo": "tiann/KernelSU",
+    "ref": "v3.3.1",
+    "tarball": false,
+    "uapi": 5,
+    "manager": "me.weishu.kernelsu",
+    "note": "官方 3.3.1"
+  },
+  "next": {
+    "repo": "KernelSU-Next/KernelSU-Next",
+    "ref": "v3.4.2",
+    "tarball": true,
+    "uapi": 5,
+    "manager": "kqvdie.zeykvw.hpbcyd",
+    "note": "包名被伪装"
+  },
+  "sukisu": {
+    "repo": "SukiSU-Ultra/SukiSU-Ultra",
+    "ref": "v4.2.1-r1",
+    "tarball": true,
+    "uapi": 6,
+    "manager": "com.sukisu.ultra",
+    "note": "默认给 SukiSU；发行版包名会随机"
+  },
+  "suki421": {
+    "repo": "SukiSU-Ultra/SukiSU-Ultra",
+    "ref": "v4.2.1-r2",
+    "tarball": true,
+    "uapi": 6,
+    "manager": "com.sukisu.ultra",
+    "note": "实验：r2 多 avc_spoof.c，本机装载后管理器查不到内核，默认用 r1"
+  },
+  "finasu121": {
+    "repo": "LyraVoid/FinaSU",
+    "ref": "v1.2.1",
+    "tarball": true,
+    "uapi": 6,
+    "manager": "me.yuki.fina",
+    "note": "默认给 FinaSU"
+  },
+  "finasu110": {
+    "repo": "LyraVoid/FinaSU",
+    "ref": "v1.0.10",
+    "tarball": true,
+    "uapi": 6,
+    "manager": "me.yuki.fina",
+    "note": "带 mount_view_filter 空判 + trylock 修复"
+  },
+  "finasu": {
+    "repo": "LyraVoid/FinaSU",
+    "ref": "v1.0.8",
+    "tarball": true,
+    "uapi": 6,
+    "manager": "me.yuki.fina",
+    "note": "无 mount_view_filter，最保守"
+  },
+  "basu420": {
+    "repo": "Baka-SU/BakaSU",
+    "ref": "d5e9e025",
+    "tarball": true,
+    "uapi": 6,
+    "manager": "com.resukisu.resukisu",
+    "note": "= APK 35252；加冕靠签名扫描，装载后跑不起来，实验"
+  },
+  "custom": {
+    "repo": "Baka-SU/BakaSU",
+    "ref": "main",
+    "tarball": true,
+    "uapi": 5,
+    "manager": "com.bakasu.bakasu",
+    "note": "历史最稳的兜底"
+  }
+}
