@@ -1,19 +1,9 @@
 # m6-bvlgari-ksu
 
-荣耀 Magic6 Pro（`BVL-AN16`）**厂商开源内核树**上编 KernelSU 系 ko，GitHub Actions 出包。
-
-**现状（2026-10-24 真机验证）**：模块 Live、管理器授权正常、授权过的 App 里
-`su -c id` = `uid=0(root) … context=u:r:ksu:s0`。uapi6 线 **FinaSU（v1.0.8/v1.0.10）** 与 **SukiSU v4.2.1-r1** 都已通过。
-细节见 [`docs/status_20261024.md`](docs/status_20261024.md)。
-
-**2026-10-25 变更**：`su` 其实由 `su_path` 注入成真实文件 `/system/bin/su`（Honor 的 `/system/bin` overlay），
-与内核 sucompat 无关；sucompat 在本机会把 execve 打成 SIGSEGV，**2.25 起默认关闭**
-（`force_feature=su_compat:0`，要恢复 `touch $RD/WANT_SUCOMPAT`）。见 [`docs/status_20261025.md`](docs/status_20261025.md)。
-
 **2026-10-27：OS10 阶段结案** —— MagicOS 10（170-175 内核）已打通、可用，成功率 ≈56%，
 瓶颈在 exploit 二进制内部，研究到此截止。结案报告见
 [`docs/status_20261027_os10-final.md`](docs/status_20261027_os10-final.md)；
-完整归档见 `m6-jailbreak-core/docs/09-os10-archive.md`。下一站：OS11（110 固件）。
+完整归档见 `m6-jailbreak-core/docs/09-os10-archive.md`。下一站：https://github.com/knowlily/m6-os11-ksu
 
 ## ko 清单
 
