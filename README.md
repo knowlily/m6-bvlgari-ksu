@@ -10,6 +10,11 @@
 与内核 sucompat 无关；sucompat 在本机会把 execve 打成 SIGSEGV，**2.25 起默认关闭**
 （`force_feature=su_compat:0`，要恢复 `touch $RD/WANT_SUCOMPAT`）。见 [`docs/status_20261025.md`](docs/status_20261025.md)。
 
+**2026-10-27：OS10 阶段结案** —— MagicOS 10（170-175 内核）已打通、可用，成功率 ≈56%，
+瓶颈在 exploit 二进制内部，研究到此截止。结案报告见
+[`docs/status_20261027_os10-final.md`](docs/status_20261027_os10-final.md)；
+完整归档见 `m6-jailbreak-core/docs/09-os10-archive.md`。下一站：OS11（110 固件）。
+
 ## ko 清单
 
 | ko | 源码 / tag | uapi | 管理器 | 状态 |
