@@ -1,3 +1,5 @@
+> ⚠ OS10 档文档，OS11 上不可直接照搬：su 机制部分是按 OS10 实测写的；OS11 走 `allow_shell=1` + ko 自带 sucompat，结论要重验。 见 [`os11-applicability.md`](os11-applicability.md)。
+
 # su 打通步骤（BVL-AN16 实操版）
 
 > 目标：让授权过的 App 里 `su -c id` 输出 `uid=0(root) … context=u:r:ksu:s0`。

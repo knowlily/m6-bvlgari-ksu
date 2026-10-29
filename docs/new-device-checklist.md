@@ -1,3 +1,5 @@
+> ⚠ OS10 档文档，OS11 上不可直接照搬：文中的内核串（`g7d3922fade43`）与 233 条符号是 OS10 的；OS11 用 `g84ffa64b710b` + `next_sym_addr_11_110.txt`（2 参 ko_patch2）。 见 [`os11-applicability.md`](os11-applicability.md)。
+
 # 新机直用清单（另一台 BVL-AN16，固件 10.0.0.170）
 
 适用范围：荣耀 Magic6 Pro `BVL-AN16`，内核 `6.1.157-android14-11-g7d3922fade43`

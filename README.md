@@ -1,5 +1,11 @@
 # m6-bvlgari-ksu
 
+> ⚠ **本仓库是 MagicOS 10 档**（内核 `6.1.157-android14-11-g7d3922fade43`）。
+> OS11（`…-g84ffa64b710b`）上 **不能整份照搬**：vermagic / 符号地址 / 内核偏移全不同，
+> 提权原语也换了一代（43499 → GL3 形态或 CVE-2026-64560）。
+> 逐篇可用性结论见 [`docs/os11-applicability.md`](docs/os11-applicability.md)；
+> OS11 的入口文档是 `m6-jailbreak-core/docs/08-os11-route.md`。
+
 **2026-10-27：OS10 阶段结案** —— MagicOS 10（170-175 内核）已打通、可用，成功率 ≈56%，
 瓶颈在 exploit 二进制内部，研究到此截止。结案报告见
 [`docs/status_20261027_os10-final.md`](docs/status_20261027_os10-final.md)；
